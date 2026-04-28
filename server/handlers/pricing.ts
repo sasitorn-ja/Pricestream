@@ -309,22 +309,23 @@ function filterRecords(records: PricingRecord[], filters: FilterParams) {
   }
 
   return records.filter((record) => {
-    const matchesDivision =
-      divisions.size === 0 || divisions.has(String(record.DIVISION_NAME ?? ""));
+    const divisionName = String(record.DIVISION_NAME ?? "");
+    const fcName = String(record.FC_NAME ?? "");
+    const matchesDivisionOrFc =
+      (divisions.size === 0 && fcNames.size === 0) ||
+      divisions.has(divisionName) ||
+      fcNames.has(fcName);
     const matchesSegment =
       segments.size === 0 || segments.has(String(record.SEGMENT ?? ""));
     const matchesChannel =
       channels.size === 0 || channels.has(String(record.CHANNEL ?? ""));
-    const matchesFcName =
-      fcNames.size === 0 || fcNames.has(String(record.FC_NAME ?? ""));
     const matchesDiscountType =
       discountTypes.size === 0 || discountTypes.has(String(record.DISCOUNT_TYPE ?? ""));
 
     return (
-      matchesDivision &&
+      matchesDivisionOrFc &&
       matchesSegment &&
       matchesChannel &&
-      matchesFcName &&
       matchesDiscountType
     );
   });
@@ -502,7 +503,8 @@ export async function getDashboard(filters: FilterParams = {}) {
             latestDayMax: filters.day
           }
         : filteredSnapshot.summary),
-    trend: filteredSnapshot.trend
+    trend: filteredSnapshot.trend,
+    divisionPriceTrend: filteredSnapshot.divisionPriceTrend
   };
 }
 

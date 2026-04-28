@@ -32,6 +32,9 @@ export type AuthUser = {
   name: string;
   email: string;
   role: "admin" | "user";
+  company?: "CPAC" | "QMIX";
+  address?: string;
+  menuPermissions?: string[];
   token?: string;
   position?: string;
   department?: string;

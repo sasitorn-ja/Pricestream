@@ -1,4 +1,6 @@
 export type ApiRequest = {
+  method?: string;
+  body?: unknown;
   query?: Record<string, string | string[] | undefined>;
   params?: Record<string, string | string[] | undefined>;
   headers?: Record<string, string | string[] | undefined>;

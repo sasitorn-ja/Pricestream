@@ -2,6 +2,18 @@ import cors from "cors";
 import express from "express";
 import path from "path";
 import {
+  approveAccessRequest,
+  changePassword,
+  formatAuthError,
+  getAdminNotificationSummary,
+  getAdminState,
+  getAuthUserFromToken,
+  loginWithEmailPassword,
+  logoutSession,
+  registerAccessRequest,
+  updateUserPermissions
+} from "./handlers/auth.js";
+import {
   forceRefreshRemoteSnapshot,
   formatHandlerError,
   getCacheStatus,
@@ -16,6 +28,12 @@ import {
 
 const app = express();
 app.use(cors());
+app.use(express.json());
+
+function readBearerToken(req: express.Request) {
+  const authorization = req.headers.authorization ?? "";
+  return authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
+}
 
 function readCsvQuery(value: unknown) {
   return String(value ?? "")
@@ -196,6 +214,85 @@ app.get("/api/cache/refresh", async (req, res) => {
     res.json(getCacheStatus());
   } catch (error) {
     res.status(502).json(formatHandlerError(error));
+  }
+});
+
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    res.json(await registerAccessRequest(req.body));
+  } catch (error) {
+    res.status(400).json(formatAuthError(error));
+  }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    res.json(await loginWithEmailPassword(String(req.body?.email ?? ""), String(req.body?.password ?? "")));
+  } catch (error) {
+    res.status(401).json(formatAuthError(error));
+  }
+});
+
+app.get("/api/auth/me", async (req, res) => {
+  try {
+    const user = await getAuthUserFromToken(readBearerToken(req));
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    res.json(user);
+  } catch (error) {
+    res.status(401).json(formatAuthError(error));
+  }
+});
+
+app.post("/api/auth/logout", async (req, res) => {
+  try {
+    await logoutSession(readBearerToken(req));
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json(formatAuthError(error));
+  }
+});
+
+app.post("/api/auth/change-password", async (req, res) => {
+  try {
+    res.json(await changePassword(readBearerToken(req), req.body));
+  } catch (error) {
+    res.status(400).json(formatAuthError(error));
+  }
+});
+
+app.get("/api/auth/admin/state", async (req, res) => {
+  try {
+    res.json(await getAdminState(readBearerToken(req)));
+  } catch (error) {
+    res.status(403).json(formatAuthError(error));
+  }
+});
+
+app.get("/api/auth/admin/notifications", async (req, res) => {
+  try {
+    res.json(await getAdminNotificationSummary(readBearerToken(req)));
+  } catch (error) {
+    res.status(403).json(formatAuthError(error));
+  }
+});
+
+app.post("/api/auth/admin/requests/:requestId/approve", async (req, res) => {
+  try {
+    res.json(await approveAccessRequest(readBearerToken(req), req.params.requestId, req.body));
+  } catch (error) {
+    res.status(400).json(formatAuthError(error));
+  }
+});
+
+app.patch("/api/auth/admin/users/:userId", async (req, res) => {
+  try {
+    res.json(await updateUserPermissions(readBearerToken(req), req.params.userId, req.body));
+  } catch (error) {
+    res.status(400).json(formatAuthError(error));
   }
 });
 

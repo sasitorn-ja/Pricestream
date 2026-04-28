@@ -15,6 +15,7 @@ import {
 } from "./helpers.js";
 import type {
   AnalyticsBundle,
+  DivisionPriceTrendPoint,
   PostDailyRow,
   PricingRecord,
   ProjectRow,
@@ -534,6 +535,48 @@ export function buildAnalytics(records: PricingRecord[], options: AnalyticsOptio
       moveInto0: bucket.moveInto0
     }));
 
+  const divisionPriceTrendByDay = new Map<
+    string,
+    {
+      day: string;
+      divisionName: string;
+      netPriceTotal: number;
+      siteCount: number;
+    }
+  >();
+
+  for (const value of postAccumulator.values()) {
+    if (value.day < analyticsConfig.baselineStart || value.totalVolume <= 0 || !value.divisionName) {
+      continue;
+    }
+
+    const postNetPrice = value.priceWeightedTotal / value.totalVolume;
+
+    const key = `${value.day}__${value.divisionName}`;
+    const current = divisionPriceTrendByDay.get(key) ?? {
+      day: value.day,
+      divisionName: value.divisionName,
+      netPriceTotal: 0,
+      siteCount: 0
+    };
+
+    current.netPriceTotal += postNetPrice;
+    current.siteCount += 1;
+    divisionPriceTrendByDay.set(key, current);
+  }
+
+  const divisionPriceTrend: DivisionPriceTrendPoint[] = [...divisionPriceTrendByDay.values()]
+    .filter((row) => row.siteCount > 0)
+    .sort((a, b) =>
+      a.day === b.day ? a.divisionName.localeCompare(b.divisionName) : a.day.localeCompare(b.day)
+    )
+    .map((row) => ({
+      day: row.day,
+      divisionName: row.divisionName,
+      avgNetPrice: round2(row.netPriceTotal / row.siteCount),
+      siteCount: row.siteCount
+    }));
+
   const comparableProjects = [...latestBySite.values()]
     .map((row) => ({
       siteNo: row.siteNo,
@@ -638,6 +681,7 @@ export function buildAnalytics(records: PricingRecord[], options: AnalyticsOptio
     summary,
     summaryByDay,
     trend,
+    divisionPriceTrend,
     projects,
     dailyProjects,
     projectTrendMap

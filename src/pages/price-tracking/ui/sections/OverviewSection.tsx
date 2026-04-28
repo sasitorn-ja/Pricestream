@@ -1,4 +1,5 @@
 type OverviewSectionProps = {
+  dashboardLabel: string;
   baselineStart: string;
   baselineEnd: string;
   campaignStart: string;
@@ -11,6 +12,7 @@ type OverviewSectionProps = {
 };
 
 export function OverviewSection({
+  dashboardLabel,
   baselineStart,
   baselineEnd,
   campaignStart,
@@ -26,7 +28,7 @@ export function OverviewSection({
       <header className="hero heroSingle">
         <div>
           <div className="heroTitleRow">
-            <h1>Dashboard ติดตามการขึ้นราคา</h1>
+            <h1>{dashboardLabel}</h1>
             <p className="heroTitleNote">
               NP_AVG = net price | Baseline {baselineStart} ถึง {baselineEnd} | ติดตามตั้งแต่ {campaignStart}
             </p>

@@ -62,6 +62,13 @@ export type TrendPoint = {
   moveInto0: number;
 };
 
+export type DivisionPriceTrendPoint = {
+  day: string;
+  divisionName: string;
+  avgNetPrice: number;
+  siteCount: number;
+};
+
 export type ProjectRow = {
   siteNo: string;
   siteName: string;
@@ -144,6 +151,7 @@ export type AnalyticsBundle = {
   summary: SummaryStats;
   summaryByDay: Map<string, SummaryStats>;
   trend: TrendPoint[];
+  divisionPriceTrend: DivisionPriceTrendPoint[];
   projects: ProjectRow[];
   dailyProjects: ProjectRow[];
   projectTrendMap: Map<string, ProjectTrendRow[]>;

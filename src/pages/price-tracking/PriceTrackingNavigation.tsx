@@ -1,42 +1,42 @@
 import { type ReactNode, useEffect, useState } from "react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { PriceTrackingIcon } from "./PriceTrackingIcon";
-import { priceTrackingMenuItems } from "./navigation";
-import {
-  NavigationMenu,
-  NavigationMenuContent,
-  NavigationMenuItem,
-  NavigationMenuLink,
-  NavigationMenuList,
-  NavigationMenuTrigger
-} from "@/components/ui/navigation-menu";
+import { type AuthUser } from "../../services/auth/authUser";
 
 const COMPACT_FILTER_BREAKPOINT = 860;
 
 type PriceTrackingNavigationProps = {
+  authUser: AuthUser;
   themeMode: "dark" | "light";
+  isSidebarCollapsed: boolean;
   onToggleTheme: () => void;
+  onToggleSidebar: () => void;
+  onLogout: () => void;
+  onOpenChangePassword: () => void;
+  pendingRequestCount: number;
+  onOpenAdminNotifications: () => void;
   filterMenu?: ReactNode;
+  showSidebarToggle?: boolean;
+  showUserActions?: boolean;
 };
 
 export function PriceTrackingNavigation({
+  authUser,
   themeMode,
+  isSidebarCollapsed,
   onToggleTheme,
-  filterMenu
+  onToggleSidebar,
+  onLogout,
+  onOpenChangePassword,
+  pendingRequestCount,
+  onOpenAdminNotifications,
+  filterMenu,
+  showSidebarToggle = true,
+  showUserActions = true
 }: PriceTrackingNavigationProps) {
-  const [showScrollToTop, setShowScrollToTop] = useState(false);
   const [isCompactFilterScreen, setIsCompactFilterScreen] = useState(false);
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
-
-  useEffect(() => {
-    function syncScrollState() {
-      setShowScrollToTop(window.scrollY > 180);
-    }
-
-    syncScrollState();
-    window.addEventListener("scroll", syncScrollState, { passive: true });
-
-    return () => window.removeEventListener("scroll", syncScrollState);
-  }, []);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
   useEffect(() => {
     function syncViewportState() {
@@ -51,45 +51,23 @@ export function PriceTrackingNavigation({
     return () => window.removeEventListener("resize", syncViewportState);
   }, []);
 
-  const handleHomeButtonClick = () => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
   const shouldShowInlineFilter = Boolean(filterMenu) && !isCompactFilterScreen;
   const shouldShowCompactFilterToggle = Boolean(filterMenu) && isCompactFilterScreen;
 
   return (
     <>
       <div className="priceTrackingHeaderMain">
-        <button
-          type="button"
-          className={`priceTrackingHomeButton${showScrollToTop ? " scrollToTop" : ""}`}
-          onClick={handleHomeButtonClick}
-          aria-label={showScrollToTop ? "กลับขึ้นด้านบน" : "หน้าแรก"}
-          title={showScrollToTop ? "กลับขึ้นด้านบน" : "หน้าแรก"}
-        >
-          <PriceTrackingIcon name={showScrollToTop ? "arrowUp" : "dashboard"} />
-        </button>
-
-        <NavigationMenu viewport={false} className="navigationMenu">
-          <NavigationMenuList>
-            <NavigationMenuItem>
-              <NavigationMenuTrigger>เมนู</NavigationMenuTrigger>
-              <NavigationMenuContent className="navigationMenuContent">
-                <div className="navigationMenuPanel">
-                  {priceTrackingMenuItems.map((item) => (
-                    <NavigationMenuLink key={item.label} asChild>
-                      <a href={item.href} className="navigationMenuItem">
-                        <strong>{item.label}</strong>
-                        <span>{item.description}</span>
-                      </a>
-                    </NavigationMenuLink>
-                  ))}
-                </div>
-              </NavigationMenuContent>
-            </NavigationMenuItem>
-          </NavigationMenuList>
-        </NavigationMenu>
+        {showSidebarToggle ? (
+          <button
+            type="button"
+            className="topbarIconButton sidebarTopbarToggle"
+            onClick={onToggleSidebar}
+            aria-label={isSidebarCollapsed ? "แสดงเมนูหลัก" : "ซ่อนเมนูหลัก"}
+            title={isSidebarCollapsed ? "แสดงเมนูหลัก" : "ซ่อนเมนูหลัก"}
+          >
+            {isSidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+          </button>
+        ) : null}
       </div>
 
       {shouldShowInlineFilter ? <div className="topbarFilterSlot">{filterMenu}</div> : null}
@@ -110,6 +88,30 @@ export function PriceTrackingNavigation({
       ) : null}
 
       <div className="topbarActions">
+        {showUserActions && authUser.role === "admin" ? (
+          <button
+            type="button"
+            className={`topbarIconButton topbarNotificationButton${pendingRequestCount > 0 ? " hasUnread" : ""}`}
+            onClick={onOpenAdminNotifications}
+            aria-label={
+              pendingRequestCount > 0
+                ? `มีคำขอสิทธิ์รออนุมัติ ${pendingRequestCount} รายการ`
+                : "ยังไม่มีคำขอสิทธิ์ใหม่"
+            }
+            title={
+              pendingRequestCount > 0
+                ? `มีคำขอสิทธิ์รออนุมัติ ${pendingRequestCount} รายการ`
+                : "ยังไม่มีคำขอสิทธิ์ใหม่"
+            }
+          >
+            <PriceTrackingIcon name="bell" />
+            {pendingRequestCount > 0 ? (
+              <span className="topbarNotificationCount">
+                {pendingRequestCount > 9 ? "9+" : pendingRequestCount}
+              </span>
+            ) : null}
+          </button>
+        ) : null}
         <button
           type="button"
           className="topbarIconButton"
@@ -119,6 +121,66 @@ export function PriceTrackingNavigation({
         >
           <PriceTrackingIcon name={themeMode === "dark" ? "sun" : "moon"} />
         </button>
+        {showUserActions ? (
+        <div className="topbarUserMenu">
+          <button
+            type="button"
+            className="topbarUser"
+            aria-expanded={isUserMenuOpen}
+            onClick={() => setIsUserMenuOpen((current) => !current)}
+          >
+            <span className="topbarUserBadge" aria-hidden="true">
+              {(authUser.name || "U").slice(0, 1).toUpperCase()}
+            </span>
+            <span className="topbarUserText">
+              <span className="topbarUserName">{authUser.name}</span>
+              <strong className="topbarUserRole">{authUser.role}</strong>
+            </span>
+            <PriceTrackingIcon name="chevron" />
+          </button>
+          {isUserMenuOpen ? (
+            <div className="topbarUserDropdown">
+              <div className="topbarUserDropdownHeader">
+                <div className="topbarUserDropdownIdentity">
+                  <span className="topbarUserDropdownBadge" aria-hidden="true">
+                    {(authUser.name || "U").slice(0, 1).toUpperCase()}
+                  </span>
+                  <div className="topbarUserDropdownCopy">
+                    <strong>{authUser.name}</strong>
+                    <span>{authUser.email}</span>
+                  </div>
+                </div>
+                <div className="topbarUserDropdownMeta">
+                  <span>{authUser.company ?? "Dashboard"}</span>
+                  <strong>{authUser.role}</strong>
+                </div>
+              </div>
+              <div className="topbarUserDropdownActions">
+                <button
+                  type="button"
+                  className="topbarUserAction"
+                  onClick={() => {
+                    setIsUserMenuOpen(false);
+                    onOpenChangePassword();
+                  }}
+                >
+                  เปลี่ยนรหัสผ่าน
+                </button>
+              </div>
+              <button
+                type="button"
+                className="topbarUserLogout"
+                onClick={() => {
+                  setIsUserMenuOpen(false);
+                  onLogout();
+                }}
+              >
+                ออกจากระบบ
+              </button>
+            </div>
+          ) : null}
+        </div>
+        ) : null}
       </div>
 
       {shouldShowCompactFilterToggle && isFilterMenuOpen ? (

@@ -1,14 +1,26 @@
 export const API_TIMEOUT_MS = 120_000;
 
-export async function fetchJson<T>(url: string): Promise<T> {
+type FetchJsonOptions = {
+  signal?: AbortSignal;
+};
+
+export function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+export async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promise<T> {
   let response: Response;
+  const timeoutSignal = AbortSignal.timeout(API_TIMEOUT_MS);
+  const requestSignal = options.signal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : timeoutSignal;
 
   try {
     response = await fetch(url, {
-      signal: AbortSignal.timeout(API_TIMEOUT_MS)
+      signal: requestSignal
     });
   } catch (error) {
-    if (error instanceof Error && error.name === "TimeoutError") {
+    if (timeoutSignal.aborted) {
       throw new Error(`Request timed out after ${API_TIMEOUT_MS / 1000} seconds`);
     }
 

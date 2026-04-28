@@ -1,5 +1,7 @@
 import { trendBucketDetailSeries, trendBucketSeries } from "../constants";
 import type {
+  DivisionPriceChartPoint,
+  DivisionPriceTrendPoint,
   MetaResponse,
   PriceLadderMode,
   ProjectTrendChartPoint,
@@ -363,6 +365,138 @@ export function getFilteredAverageTrend({
   }
 
   return baseTrend;
+}
+
+function createEmptyDivisionSeriesPoint(day: string): DivisionPriceChartPoint {
+  return { day };
+}
+
+function aggregateDivisionPriceTrendPoints(points: DivisionPriceTrendPoint[]) {
+  const grouped = new Map<
+    string,
+    {
+      day: string;
+      periodEnd: string;
+      divisionName: string;
+      netPriceTotal: number;
+      siteCount: number;
+    }
+  >();
+
+  points.forEach((point) => {
+    const { periodStart, periodEnd } = getMonthWeekPeriod(point.day);
+    const key = `${periodStart}__${point.divisionName}`;
+    const current = grouped.get(key) ?? {
+      day: periodStart,
+      periodEnd,
+      divisionName: point.divisionName,
+      netPriceTotal: 0,
+      siteCount: 0
+    };
+
+    current.netPriceTotal += point.avgNetPrice * point.siteCount;
+    current.siteCount += point.siteCount;
+    current.periodEnd = point.day > current.periodEnd ? point.day : current.periodEnd;
+    grouped.set(key, current);
+  });
+
+  return [...grouped.values()]
+    .filter((point) => point.siteCount > 0)
+    .sort((left, right) =>
+      left.day === right.day
+        ? left.divisionName.localeCompare(right.divisionName)
+        : left.day.localeCompare(right.day)
+    )
+    .map((point) => ({
+      day: point.day,
+      periodEnd: point.periodEnd,
+      divisionName: point.divisionName,
+      avgNetPrice: point.netPriceTotal / point.siteCount,
+      siteCount: point.siteCount
+    }));
+}
+
+export function getDivisionPriceTrendByGranularity({
+  trend,
+  granularity
+}: {
+  trend: DivisionPriceTrendPoint[];
+  granularity: TrendGranularity;
+}) {
+  return granularity === "weekly" ? aggregateDivisionPriceTrendPoints(trend) : trend;
+}
+
+export function getFilteredDivisionPriceTrend({
+  meta,
+  trend,
+  trendRange
+}: {
+  meta: MetaResponse | null;
+  trend: DivisionPriceTrendPoint[];
+  trendRange: TrendRange;
+}) {
+  const baseTrend =
+    meta && trendRange === "post25"
+      ? trend.filter((point) => point.day >= meta.config.campaignStart)
+      : trend;
+  const uniqueDays = [...new Set(baseTrend.map((point) => point.day))].sort((left, right) =>
+    left.localeCompare(right)
+  );
+
+  if (trendRange === "last14") {
+    const cutoffDays = new Set(uniqueDays.slice(-14));
+    return baseTrend.filter((point) => cutoffDays.has(point.day));
+  }
+
+  if (trendRange === "last7") {
+    const cutoffDays = new Set(uniqueDays.slice(-7));
+    return baseTrend.filter((point) => cutoffDays.has(point.day));
+  }
+
+  return baseTrend;
+}
+
+export function buildDivisionPriceChartData({
+  trend,
+  divisions
+}: {
+  trend: DivisionPriceTrendPoint[];
+  divisions: string[];
+}) {
+  const selectedDivisions = divisions.length > 0 ? divisions : [...new Set(trend.map((point) => point.divisionName))];
+  const selectedDivisionSet = new Set(selectedDivisions);
+  const points = trend.filter((point) => selectedDivisionSet.has(point.divisionName));
+  const days = [...new Set(points.map((point) => point.day))].sort((left, right) => left.localeCompare(right));
+  const periodEndByDay = new Map(
+    points
+      .filter((point) => "periodEnd" in point && typeof (point as { periodEnd?: string }).periodEnd === "string")
+      .map((point) => [point.day, (point as { periodEnd?: string }).periodEnd])
+  );
+  const pointByDay = new Map<string, DivisionPriceChartPoint>(
+    days.map((day) => {
+      const nextPoint = createEmptyDivisionSeriesPoint(day);
+      const periodEnd = periodEndByDay.get(day);
+      if (periodEnd) {
+        nextPoint.periodEnd = periodEnd;
+      }
+      return [day, nextPoint];
+    })
+  );
+
+  points.forEach((point) => {
+    const current = pointByDay.get(point.day);
+    if (current) {
+      current[point.divisionName] = point.avgNetPrice;
+      if ("periodEnd" in point && typeof (point as { periodEnd?: string }).periodEnd === "string") {
+        current.periodEnd = (point as { periodEnd?: string }).periodEnd;
+      }
+    }
+  });
+
+  return {
+    divisions: selectedDivisions,
+    data: days.map((day) => pointByDay.get(day) ?? createEmptyDivisionSeriesPoint(day))
+  };
 }
 
 export function buildActiveTableFilters({

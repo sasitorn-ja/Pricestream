@@ -22,7 +22,7 @@ type SharedFilterMenuBarProps = {
   onResetSharedFilters: () => void;
   onToggleDivision: (value: string) => void;
   onClearDivisions: () => void;
-  onToggleFcName: (value: string) => void;
+  onToggleFcName: (division: string, value: string) => void;
   onClearFcNames: () => void;
   onToggleSegment: (value: string) => void;
   onClearSegments: () => void;
@@ -61,10 +61,16 @@ export function SharedFilterMenuBar({
   onToggleDiscountType,
   onClearDiscountTypes
 }: SharedFilterMenuBarProps) {
+  const hasSelectedEveryDivision =
+    availableDivisions.length > 0 &&
+    selectedDivisions.length === availableDivisions.length &&
+    availableDivisions.every((division) => selectedDivisions.includes(division));
   const divisionSummary =
     selectedFcNames.length > 0
       ? `FC ${selectedFcNames.length} รายการ`
-      : summarizeMultiSelect(selectedDivisions, "ทุก division");
+      : hasSelectedEveryDivision
+        ? "ทั้งหมด"
+        : summarizeMultiSelect(selectedDivisions, "ไม่เลือก");
 
   return (
     <div className={`sharedFilterMenuBar${className ? ` ${className}` : ""}`} aria-label="ตัวกรองกราฟ">

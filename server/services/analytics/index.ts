@@ -11,6 +11,7 @@ export {
 } from "./helpers.js";
 export type {
   AnalyticsBundle,
+  DivisionPriceTrendPoint,
   DiscountDropKey,
   PostDailyRow,
   PricingRecord,

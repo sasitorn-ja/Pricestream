@@ -14,7 +14,7 @@ type CompactDashboardFiltersProps = {
   selectedDiscountTypes: string[];
   onToggleDivision: (value: string) => void;
   onClearDivisions: () => void;
-  onToggleFcName: (value: string) => void;
+  onToggleFcName: (division: string, value: string) => void;
   onClearFcNames: () => void;
   onToggleSegment: (value: string) => void;
   onClearSegments: () => void;

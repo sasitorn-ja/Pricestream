@@ -1,120 +1,114 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
+import { type AuthUser } from "../services/auth/authUser";
 import {
-  clearAuthUser,
-  getAuthUser,
-  setRawAuthUser,
-  type AuthUser
-} from "../services/auth/authUser";
-
-const ROP_PORTAL_URL = import.meta.env.VITE_ROP_PORTAL_URL || "https://dev-rop.cipcloud.net/home";
-const ROP_RETURN_URL_PARAM = import.meta.env.VITE_ROP_RETURN_URL_PARAM || "redirect_uri";
-const SHOW_LOCAL_AUTH_IMPORT = import.meta.env.DEV;
-const CALLBACK_AUTH_PARAM_NAMES = ["auth_user", "payload", "token", "profile"];
-const BYPASS_AUTH_GATE = true;
-const PREVIEW_AUTH_USER: AuthUser = {
-  id: "preview",
-  username: "preview",
-  name: "Preview User",
-  email: "preview@local",
-  role: "admin"
-};
+  bootstrapLocalAuth,
+  clearLocalAuthSession,
+  getCurrentLocalAuthUser,
+  loginWithEmailPassword,
+  registerAccessRequest,
+  type CompanyCode
+} from "../services/auth/localAuth";
 
 type AuthGateProps = {
-  children: (authUser: AuthUser, onLogout: () => void) => ReactNode;
+  children: (
+    authUser: AuthUser,
+    onLogout: () => void,
+    authActions: { openChangePassword: () => void; closeChangePassword: () => void; isChangePasswordOpen: boolean }
+  ) => ReactNode;
 };
-
-function readCallbackAuthPayload() {
-  const searchParams = new URLSearchParams(window.location.search);
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-
-  for (const key of CALLBACK_AUTH_PARAM_NAMES) {
-    const value = searchParams.get(key) ?? hashParams.get(key);
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-function removeCallbackAuthParams() {
-  const url = new URL(window.location.href);
-  let changed = false;
-
-  for (const key of CALLBACK_AUTH_PARAM_NAMES) {
-    if (url.searchParams.has(key)) {
-      url.searchParams.delete(key);
-      changed = true;
-    }
-  }
-
-  const hashParams = new URLSearchParams(url.hash.replace(/^#/, ""));
-  for (const key of CALLBACK_AUTH_PARAM_NAMES) {
-    if (hashParams.has(key)) {
-      hashParams.delete(key);
-      changed = true;
-    }
-  }
-
-  url.hash = hashParams.toString();
-
-  if (changed) {
-    window.history.replaceState({}, document.title, url);
-  }
-}
 
 export function AuthGate({ children }: AuthGateProps) {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [hasCheckedAuth, setHasCheckedAuth] = useState(false);
-  const [localAuthPayload, setLocalAuthPayload] = useState("");
-  const [localAuthError, setLocalAuthError] = useState("");
+  const [mode, setMode] = useState<"login" | "request">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [requestName, setRequestName] = useState("");
+  const [requestCompany, setRequestCompany] = useState<CompanyCode>("CPAC");
+  const [authError, setAuthError] = useState("");
+  const [requestSuccess, setRequestSuccess] = useState("");
+  const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   useEffect(() => {
-    const callbackAuthPayload = readCallbackAuthPayload();
-    if (callbackAuthPayload) {
-      setRawAuthUser(callbackAuthPayload);
-      removeCallbackAuthParams();
-    }
-
-    setAuthUser(getAuthUser());
-    setHasCheckedAuth(true);
+    bootstrapLocalAuth();
+    void getCurrentLocalAuthUser().then((user) => {
+      setAuthUser(user);
+      setHasCheckedAuth(true);
+    });
   }, []);
 
-  const handleLogin = () => {
-    const portalUrl = new URL(ROP_PORTAL_URL);
-    if (ROP_RETURN_URL_PARAM) {
-      portalUrl.searchParams.set(ROP_RETURN_URL_PARAM, window.location.href);
-    }
-    window.location.href = portalUrl.toString();
-  };
-
-  const handleLocalAuthImport = () => {
-    const payload = localAuthPayload.trim();
-    if (!payload) {
-      setLocalAuthError("กรุณาวางค่า auth_user");
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isSubmittingLogin) {
       return;
     }
 
-    setRawAuthUser(payload);
-    const importedUser = getAuthUser();
-    if (!importedUser) {
-      clearAuthUser();
-      setLocalAuthError("อ่านค่า auth_user ไม่ได้: ให้ copy value ของ key auth_user ทั้งก้อนจาก dev-rop");
+    const normalizedEmail = email.trim().toLowerCase();
+    setIsSubmittingLogin(true);
+    try {
+      setAuthUser(await loginWithEmailPassword(normalizedEmail, password));
+      setEmail(normalizedEmail);
+      setPassword("");
+      setAuthError("");
+      setRequestSuccess("");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "เข้าสู่ระบบไม่สำเร็จ");
+    } finally {
+      setIsSubmittingLogin(false);
+    }
+  };
+
+  const handleRequestAccess = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isSubmittingRequest) {
       return;
     }
 
-    setLocalAuthError("");
-    setAuthUser(importedUser);
+    const normalizedEmail = email.trim().toLowerCase();
+    const trimmedName = requestName.trim();
+    setIsSubmittingRequest(true);
+    try {
+      await registerAccessRequest({
+        email: normalizedEmail,
+        name: trimmedName,
+        company: requestCompany
+      });
+      setAuthError("");
+      setRequestSuccess(
+        `ส่งคำขอแล้ว หลังจาก admin อนุมัติ ระบบจะส่งรหัสผ่านไปที่อีเมล ${normalizedEmail}`
+      );
+      setMode("login");
+      setEmail(normalizedEmail);
+      setPassword("");
+      setRequestName("");
+    } catch (error) {
+      setRequestSuccess("");
+      setAuthError(error instanceof Error ? error.message : "ส่งคำขอไม่สำเร็จ");
+    } finally {
+      setIsSubmittingRequest(false);
+    }
   };
 
-  const handleLogout = () => {
-    clearAuthUser();
-    setAuthUser(null);
-  };
+  const handleLogout = async () => {
+    if (isLoggingOut) {
+      return;
+    }
 
-  if (BYPASS_AUTH_GATE) {
-    return children(PREVIEW_AUTH_USER, () => undefined);
-  }
+    setIsLoggingOut(true);
+    try {
+      await clearLocalAuthSession();
+      setAuthUser(null);
+      setPassword("");
+      setIsChangePasswordOpen(false);
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   if (!hasCheckedAuth) {
     return (
@@ -125,38 +119,144 @@ export function AuthGate({ children }: AuthGateProps) {
     );
   }
 
-  if (!authUser) {
-    return (
-      <div className="authScreen">
-        <section className="authPanel" aria-labelledby="auth-title">
-          <p className="authEyebrow">Pricing Monitor</p>
-          <h1 id="auth-title">เข้าสู่ระบบ</h1>
-          <p className="authIntro">กรุณาเข้าสู่ระบบผ่าน ROP Portal เพื่อใช้งาน dashboard</p>
-          <button type="button" className="authLoginButton" onClick={handleLogin}>
-            เข้าสู่ระบบผ่าน ROP Portal
-          </button>
-          <p className="authPortalUrl">dev-rop.cipcloud.net</p>
-          {SHOW_LOCAL_AUTH_IMPORT ? (
-            <div className="authLocalImport">
-              <textarea
-                value={localAuthPayload}
-                onChange={(event) => {
-                  setLocalAuthPayload(event.target.value);
-                  setLocalAuthError("");
-                }}
-                placeholder="วางค่า auth_user สำหรับทดสอบบน local"
-                rows={3}
-              />
-              {localAuthError ? <p className="authLocalError">{localAuthError}</p> : null}
-              <button type="button" className="authSecondaryButton" onClick={handleLocalAuthImport}>
-                ใช้ auth_user นี้
-              </button>
-            </div>
-          ) : null}
-        </section>
-      </div>
-    );
+  if (authUser) {
+    return children(authUser, handleLogout, {
+      openChangePassword: () => setIsChangePasswordOpen(true),
+      closeChangePassword: () => setIsChangePasswordOpen(false),
+      isChangePasswordOpen
+    });
   }
 
-  return children(authUser, handleLogout);
+  return (
+    <div className="authScreen">
+      <section className="authPanel" aria-labelledby="auth-title">
+        <p className="authEyebrow">Pricing Monitor</p>
+        <h1 id="auth-title">{mode === "login" ? "เข้าสู่ระบบ" : "ขอสิทธิ์เข้าใช้งาน"}</h1>
+        <p className="authIntro">
+          {mode === "login"
+            ? "เข้าสู่ระบบด้วยอีเมลของคุณและรหัสผ่านที่ได้รับหลัง admin อนุมัติ"
+            : "กรอกอีเมลของคุณเพื่อรับรหัสผ่านหลังจาก admin อนุมัติคำขอ"}
+        </p>
+
+        {mode === "login" ? (
+          <form className="authForm" onSubmit={handleLogin}>
+            <label>
+              <span>อีเมลของคุณ</span>
+              <input
+                type="email"
+                value={email}
+                disabled={isSubmittingLogin}
+                autoComplete="email"
+                inputMode="email"
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  setAuthError("");
+                  setRequestSuccess("");
+                }}
+                placeholder="your.email@company.com"
+                required
+              />
+            </label>
+            <label>
+              <span>Password</span>
+              <div className="passwordField">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  disabled={isSubmittingLogin}
+                  autoComplete="current-password"
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    setAuthError("");
+                  }}
+                  placeholder="รหัสผ่าน"
+                  required
+                />
+                <button
+                  type="button"
+                  className="passwordToggleButton"
+                  disabled={isSubmittingLogin}
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={showPassword ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"}
+                  title={showPassword ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"}
+                >
+                  {showPassword ? <EyeOff /> : <Eye />}
+                </button>
+              </div>
+            </label>
+            {authError ? <p className="authLocalError" role="alert">{authError}</p> : null}
+            {requestSuccess ? <p className="authSuccess" role="status">{requestSuccess}</p> : null}
+            <button type="submit" className="authLoginButton" disabled={isSubmittingLogin}>
+              {isSubmittingLogin ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+            </button>
+          </form>
+        ) : (
+          <form className="authForm" onSubmit={handleRequestAccess}>
+            <label>
+              <span>อีเมลที่จะรับรหัสผ่าน</span>
+              <input
+                type="email"
+                value={email}
+                disabled={isSubmittingRequest}
+                autoComplete="email"
+                inputMode="email"
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  setAuthError("");
+                }}
+                placeholder="your.email@company.com"
+                required
+              />
+            </label>
+            <label>
+              <span>ชื่อบริษัท / ชื่อผู้ใช้งาน</span>
+              <input
+                value={requestName}
+                disabled={isSubmittingRequest}
+                autoComplete="name"
+                onChange={(event) => {
+                  setRequestName(event.target.value);
+                  setAuthError("");
+                }}
+                placeholder="ชื่อบริษัทหรือชื่อผู้ใช้งาน"
+                required
+              />
+            </label>
+            <label>
+              <span>อยู่ CPAC หรือ QMIX</span>
+              <select
+                value={requestCompany}
+                disabled={isSubmittingRequest}
+                onChange={(event) => setRequestCompany(event.target.value as CompanyCode)}
+              >
+                <option value="CPAC">CPAC</option>
+                <option value="QMIX">QMIX</option>
+              </select>
+            </label>
+            <p className="authInfoBox">
+              หลังจาก admin อนุมัติ ระบบจะส่งรหัสผ่านสำหรับเข้าใช้งานไปที่อีเมลนี้
+            </p>
+            {authError ? <p className="authLocalError" role="alert">{authError}</p> : null}
+            <button type="submit" className="authLoginButton" disabled={isSubmittingRequest}>
+              {isSubmittingRequest ? "กำลังส่งคำขอ..." : "ส่งคำขอให้ admin อนุมัติ"}
+            </button>
+          </form>
+        )}
+
+        <button
+          type="button"
+          className="authTextButton"
+          disabled={isSubmittingLogin || isSubmittingRequest}
+          onClick={() => {
+            setMode((current) => (current === "login" ? "request" : "login"));
+            setAuthError("");
+            setRequestSuccess("");
+            setPassword("");
+          }}
+        >
+          {mode === "login" ? "ยังไม่มีรหัสผ่าน ขอสิทธิ์เข้าใช้งาน" : "กลับไปหน้าเข้าสู่ระบบ"}
+        </button>
+      </section>
+    </div>
+  );
 }

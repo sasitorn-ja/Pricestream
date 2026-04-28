@@ -78,6 +78,19 @@ export type TrendPoint = {
   moveInto0: number;
 };
 
+export type DivisionPriceTrendPoint = {
+  day: string;
+  divisionName: string;
+  avgNetPrice: number;
+  siteCount: number;
+};
+
+export type DivisionPriceChartPoint = {
+  day: string;
+  periodEnd?: string;
+  [divisionName: string]: string | number | null | undefined;
+};
+
 export type ShareTrendPoint = TrendPoint & {
   ladder300Plus: number;
   ladder300PlusShare: number;
@@ -151,6 +164,7 @@ export type DashboardResponse = {
   meta: MetaResponse;
   summary: SummaryResponse;
   trend: TrendPoint[];
+  divisionPriceTrend: DivisionPriceTrendPoint[];
 };
 
 export type TrendRange = "all" | "post25" | "last14" | "last7";

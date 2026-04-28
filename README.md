@@ -34,6 +34,20 @@ Backend API จะอยู่ที่ `http://localhost:8787`
 
 ตั้งค่า DataOcean API ใน `.env`
 
+## Auth Setup
+
+ถ้าใช้ระบบอนุมัติผู้ใช้งานผ่านอีเมล ให้ตั้งค่า SMTP เพิ่มใน `.env`
+
+```bash
+SMTP_HOST=smtp-mail.outlook.com
+SMTP_PORT=587
+SMTP_USER=your-account@hotmail.com
+SMTP_PASS=your-password-or-app-password
+MAIL_FROM="Pricing Monitor <your-account@hotmail.com>"
+```
+
+สำหรับ production ให้เปลี่ยนเป็น URL จริงของหน้าแอป เช่น `https://your-app.vercel.app`
+
 ## Vercel
 
 รองรับแล้ว โดยแนะนำให้ตั้ง Environment Variables ใน Vercel:

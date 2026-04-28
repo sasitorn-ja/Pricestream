@@ -33,6 +33,7 @@ import {
 const AVERAGE_INCREASE_Y_AXIS_TICKS = [0, 100, 200, 300, 600, 900, 1200, 1500];
 const DAILY_POINT_WIDTH = 68;
 const MIN_SCROLLABLE_CHART_WIDTH = 960;
+const CHART_SIDE_PADDING = 24;
 
 type AveragePointLabelProps = {
   x?: unknown;
@@ -170,7 +171,12 @@ export function TrendChartsSection({
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart
                   data={filteredAverageTrend}
-                  margin={{ top: 36, right: 8, left: 0, bottom: isDailyGranularity ? 12 : 0 }}
+                  margin={{
+                    top: 36,
+                    right: CHART_SIDE_PADDING,
+                    left: CHART_SIDE_PADDING / 2,
+                    bottom: isDailyGranularity ? 12 : 0
+                  }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#2f3e65" />
                   <XAxis
@@ -178,6 +184,7 @@ export function TrendChartsSection({
                     tickFormatter={(value) => formatTrendTick(value, filteredAverageTrend)}
                     stroke="#9fb0d0"
                     interval={shouldShowEveryAverageTick ? 0 : "preserveStartEnd"}
+                    padding={{ left: CHART_SIDE_PADDING / 2, right: CHART_SIDE_PADDING }}
                     minTickGap={shouldShowEveryAverageTick ? 6 : 12}
                     height={36}
                     tickMargin={8}
@@ -278,7 +285,12 @@ export function TrendChartsSection({
                 <BarChart
                   data={proportionTrendData}
                   barCategoryGap="10%"
-                  margin={{ top: 0, right: 0, left: 0, bottom: isDailyGranularity ? 12 : 0 }}
+                  margin={{
+                    top: 0,
+                    right: CHART_SIDE_PADDING,
+                    left: CHART_SIDE_PADDING / 2,
+                    bottom: isDailyGranularity ? 12 : 0
+                  }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#2f3e65" />
                   <XAxis
@@ -286,6 +298,7 @@ export function TrendChartsSection({
                     tickFormatter={(value) => formatTrendTick(value, proportionTrendData)}
                     stroke="#9fb0d0"
                     interval={shouldShowEveryProportionTick ? 0 : "preserveStartEnd"}
+                    padding={{ left: CHART_SIDE_PADDING / 2, right: CHART_SIDE_PADDING }}
                     minTickGap={shouldShowEveryProportionTick ? 6 : 12}
                     height={36}
                     tickMargin={8}
@@ -368,7 +381,12 @@ export function TrendChartsSection({
                 <BarChart
                   data={proportionTrendData}
                   barCategoryGap="10%"
-                  margin={{ top: 0, right: 0, left: 0, bottom: isDailyGranularity ? 12 : 0 }}
+                  margin={{
+                    top: 0,
+                    right: CHART_SIDE_PADDING,
+                    left: CHART_SIDE_PADDING / 2,
+                    bottom: isDailyGranularity ? 12 : 0
+                  }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#2f3e65" />
                   <XAxis
@@ -376,6 +394,7 @@ export function TrendChartsSection({
                     tickFormatter={(value) => formatTrendTick(value, proportionTrendData)}
                     stroke="#9fb0d0"
                     interval={shouldShowEveryProportionTick ? 0 : "preserveStartEnd"}
+                    padding={{ left: CHART_SIDE_PADDING / 2, right: CHART_SIDE_PADDING }}
                     minTickGap={shouldShowEveryProportionTick ? 6 : 12}
                     height={36}
                     tickMargin={8}

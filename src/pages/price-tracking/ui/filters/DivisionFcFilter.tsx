@@ -7,7 +7,7 @@ type DivisionFcFilterProps = {
   selectedFcNames: string[];
   onToggleDivision: (value: string) => void;
   onClearDivisions: () => void;
-  onToggleFcName: (value: string) => void;
+  onToggleFcName: (division: string, value: string) => void;
   onClearFcNames: () => void;
 };
 
@@ -23,8 +23,26 @@ export function DivisionFcFilter({
 }: DivisionFcFilterProps) {
   const [openDivision, setOpenDivision] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const activeDivisionCheckboxRef = useRef<HTMLInputElement | null>(null);
   const activeFcNames = openDivision ? (fcNamesByDivision[openDivision] ?? []) : [];
-  const isActiveDivisionSelected = openDivision ? selectedDivisions.includes(openDivision) : false;
+  const hasSelectedEveryDivision =
+    divisions.length > 0 &&
+    selectedDivisions.length === divisions.length &&
+    divisions.every((division) => selectedDivisions.includes(division));
+  const selectedActiveFcCount = activeFcNames.filter((fcName) => selectedFcNames.includes(fcName)).length;
+  const hasActiveFcSelection = selectedActiveFcCount > 0;
+  const hasSelectedEveryActiveFc = activeFcNames.length > 0 && selectedActiveFcCount === activeFcNames.length;
+  const isActiveDivisionExplicitlySelected =
+    openDivision !== null &&
+    !hasSelectedEveryDivision &&
+    selectedDivisions.includes(openDivision) &&
+    !hasActiveFcSelection;
+  const isActiveDivisionChecked = hasActiveFcSelection
+    ? hasSelectedEveryActiveFc
+    : isActiveDivisionExplicitlySelected;
+  const isActiveDivisionIndeterminate = hasActiveFcSelection
+    ? !hasSelectedEveryActiveFc
+    : hasSelectedEveryDivision;
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -50,12 +68,20 @@ export function DivisionFcFilter({
     };
   }, []);
 
+  useEffect(() => {
+    if (!activeDivisionCheckboxRef.current) {
+      return;
+    }
+
+    activeDivisionCheckboxRef.current.indeterminate = isActiveDivisionIndeterminate;
+  }, [isActiveDivisionIndeterminate, openDivision]);
+
   return (
     <div ref={dropdownRef} className="divisionFcSplit">
       <div className="divisionDropdownRow">
         <button
           type="button"
-          className={`compactFilterChip ${selectedDivisions.length === 0 && selectedFcNames.length === 0 ? "selected" : ""}`}
+          className={`compactFilterChip ${hasSelectedEveryDivision && selectedFcNames.length === 0 ? "selected" : ""}`}
           onClick={() => {
             onClearDivisions();
             onClearFcNames();
@@ -71,7 +97,7 @@ export function DivisionFcFilter({
         ) : null}
         {divisions.map((division) => {
           const fcNames = fcNamesByDivision[division] ?? [];
-          const isDivisionSelected = selectedDivisions.includes(division);
+          const isDivisionSelected = !hasSelectedEveryDivision && selectedDivisions.includes(division);
           const selectedFcCount = fcNames.filter((fcName) =>
             selectedFcNames.includes(fcName)
           ).length;
@@ -95,10 +121,11 @@ export function DivisionFcFilter({
 
       {openDivision ? (
         <div className="divisionInlineMenu">
-          <label className={`divisionCheck ${isActiveDivisionSelected ? "selected" : ""}`}>
+          <label className={`divisionCheck ${isActiveDivisionChecked || isActiveDivisionIndeterminate ? "selected" : ""}`}>
             <input
+              ref={activeDivisionCheckboxRef}
               type="checkbox"
-              checked={isActiveDivisionSelected}
+              checked={isActiveDivisionChecked}
               onChange={() => onToggleDivision(openDivision)}
             />
             <span>ทั้งหมดใน {openDivision}</span>
@@ -112,7 +139,7 @@ export function DivisionFcFilter({
                 <input
                   type="checkbox"
                   checked={selectedFcNames.includes(fcName)}
-                  onChange={() => onToggleFcName(fcName)}
+                  onChange={() => onToggleFcName(openDivision, fcName)}
                 />
                 <span>{fcName}</span>
               </label>
