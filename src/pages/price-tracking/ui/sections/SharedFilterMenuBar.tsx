@@ -1,3 +1,5 @@
+import { CalendarDays } from "lucide-react";
+import { useRef } from "react";
 import { DivisionFcFilter } from "../filters/DivisionFcFilter";
 import { MultiSelectDropdown } from "../filters/MultiSelectDropdown";
 import { summarizeMultiSelect } from "../../utils/filters";
@@ -61,6 +63,8 @@ export function SharedFilterMenuBar({
   onToggleDiscountType,
   onClearDiscountTypes
 }: SharedFilterMenuBarProps) {
+  const baselineStartInputRef = useRef<HTMLInputElement | null>(null);
+  const baselineEndInputRef = useRef<HTMLInputElement | null>(null);
   const hasSelectedEveryDivision =
     availableDivisions.length > 0 &&
     selectedDivisions.length === availableDivisions.length &&
@@ -71,6 +75,22 @@ export function SharedFilterMenuBar({
       : hasSelectedEveryDivision
         ? "ทั้งหมด"
         : summarizeMultiSelect(selectedDivisions, "ไม่เลือก");
+
+  const openDatePicker = (input: HTMLInputElement | null) => {
+    if (!input) {
+      return;
+    }
+
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
+
+    if (typeof pickerInput.showPicker === "function") {
+      pickerInput.showPicker();
+      return;
+    }
+
+    input.focus();
+    input.click();
+  };
 
   return (
     <div className={`sharedFilterMenuBar${className ? ` ${className}` : ""}`} aria-label="ตัวกรองกราฟ">
@@ -89,19 +109,41 @@ export function SharedFilterMenuBar({
         </button>
         <label>
           <span>เริ่ม</span>
-          <input
-            type="date"
-            value={selectedBaselineStart}
-            onChange={(event) => onBaselineStartChange(event.target.value)}
-          />
+          <span className="topbarDateInputWrap">
+            <input
+              ref={baselineStartInputRef}
+              type="date"
+              value={selectedBaselineStart}
+              onChange={(event) => onBaselineStartChange(event.target.value)}
+            />
+            <button
+              type="button"
+              className="topbarDatePickerButton"
+              aria-label="เลือกวันที่เริ่ม"
+              onClick={() => openDatePicker(baselineStartInputRef.current)}
+            >
+              <CalendarDays aria-hidden="true" />
+            </button>
+          </span>
         </label>
         <label>
           <span>ถึง</span>
-          <input
-            type="date"
-            value={selectedBaselineEnd}
-            onChange={(event) => onBaselineEndChange(event.target.value)}
-          />
+          <span className="topbarDateInputWrap">
+            <input
+              ref={baselineEndInputRef}
+              type="date"
+              value={selectedBaselineEnd}
+              onChange={(event) => onBaselineEndChange(event.target.value)}
+            />
+            <button
+              type="button"
+              className="topbarDatePickerButton"
+              aria-label="เลือกวันที่สิ้นสุด"
+              onClick={() => openDatePicker(baselineEndInputRef.current)}
+            >
+              <CalendarDays aria-hidden="true" />
+            </button>
+          </span>
         </label>
       </div>
 

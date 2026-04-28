@@ -2291,6 +2291,12 @@ select {
   line-height: 1;
 }
 
+.topbarDateInputWrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
 .topbarBaselineControls input {
   display: block;
   width: 100%;
@@ -2300,7 +2306,7 @@ select {
   background-color: transparent;
   color: #eef4ff;
   color-scheme: dark;
-  padding: 0;
+  padding: 0 28px 0 0;
   font-family:
     system-ui,
     -apple-system,
@@ -2317,8 +2323,10 @@ select {
 }
 
 .topbarBaselineControls input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  width: 0;
   margin: 0;
-  cursor: pointer;
+  pointer-events: none;
 }
 
 .topbarBaselineControls input::-webkit-datetime-edit-fields-wrapper,
@@ -2327,6 +2335,40 @@ select {
   padding: 0;
   line-height: 1.2;
   text-align: left;
+}
+
+.topbarDatePickerButton {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #bfd0ef;
+  padding: 0;
+  transform: translateY(-50%);
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.topbarDatePickerButton:hover,
+.topbarDatePickerButton:focus-visible {
+  background: rgba(42, 91, 155, 0.2);
+  color: #eef4ff;
+  outline: none;
+}
+
+.topbarDatePickerButton svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.2;
 }
 
 .topbarSharedFilter .sharedDivisionDropdown > summary,
@@ -4021,6 +4063,16 @@ body[data-theme="light"] .topbarBaselineControls label span {
 body[data-theme="light"] .topbarBaselineControls input {
   color-scheme: light;
   color: #182235;
+}
+
+body[data-theme="light"] .topbarDatePickerButton {
+  color: #52627d;
+}
+
+body[data-theme="light"] .topbarDatePickerButton:hover,
+body[data-theme="light"] .topbarDatePickerButton:focus-visible {
+  background: rgba(219, 234, 254, 0.92);
+  color: #1f3658;
 }
 
 body[data-theme="light"] .topbarBaselineControls input::-webkit-calendar-picker-indicator {
