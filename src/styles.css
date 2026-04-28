@@ -2262,7 +2262,7 @@ select {
 
 .topbarBaselineControls {
   display: grid;
-  grid-template-columns: auto minmax(106px, 1fr) minmax(106px, 1fr);
+  grid-template-columns: auto minmax(132px, 1fr) minmax(132px, 1fr);
   align-items: center;
   gap: 5px;
   min-width: 0;
@@ -2292,33 +2292,33 @@ select {
 }
 
 .topbarBaselineControls input {
-  min-height: 18px;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 22px;
   border: 0;
   background-color: transparent;
-  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23dbeafe'%20stroke-width='2.4'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M8%202v4M16%202v4M3%2010h18M5%204h14a2%202%200%200%201%202%202v14a2%202%200%200%201-2%202H5a2%202%200%200%201-2-2V6a2%202%200%200%201%202-2z'/%3E%3C/svg%3E");
-  background-position: right 2px center;
-  background-repeat: no-repeat;
-  background-size: 14px 14px;
   color: #eef4ff;
   color-scheme: dark;
-  padding: 0 18px 0 0;
+  padding: 0;
   font: inherit;
-  font-size: 0.76rem;
-  font-weight: 800;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.2;
+  appearance: auto;
+  -webkit-appearance: auto;
 }
 
 .topbarBaselineControls input::-webkit-calendar-picker-indicator {
-  width: 18px;
-  height: 18px;
-  margin-left: -18px;
-  background: transparent;
-  filter: none;
+  margin: 0;
   cursor: pointer;
-  opacity: 0;
 }
 
-.topbarBaselineControls input::-webkit-calendar-picker-indicator:hover {
-  opacity: 0;
+.topbarBaselineControls input::-webkit-datetime-edit,
+.topbarBaselineControls input::-webkit-date-and-time-value {
+  padding: 0;
+  line-height: 1.2;
+  text-align: left;
 }
 
 .topbarSharedFilter .sharedDivisionDropdown > summary,
