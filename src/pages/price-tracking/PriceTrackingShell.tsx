@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useState } from "react";
-import { LayoutGrid, Shield, TrendingUp, type LucideIcon } from "lucide-react";
+import { LayoutGrid, Shield, TrendingUp, X, type LucideIcon } from "lucide-react";
 import { PriceTrackingNavigation } from "./PriceTrackingNavigation";
 import { type AuthUser } from "../../services/auth/authUser";
 import { getAdminNotificationSummary, type AppMenuKey } from "../../services/auth/localAuth";
@@ -62,9 +62,11 @@ export function PriceTrackingShell({
   hideSidebar = false,
   hideUserActions = false
 }: PriceTrackingShellProps) {
+  const [isMobileViewport, setIsMobileViewport] = useState(() => window.innerWidth <= 980);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     return window.localStorage.getItem("pricing-monitor-sidebar") === "collapsed";
   });
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const companyDisplayName = getCompanyDisplayName(authUser.company);
   const sidebarMenus = allowedMenus.filter((menu) =>
@@ -79,6 +81,42 @@ export function PriceTrackingShell({
       isSidebarCollapsed ? "collapsed" : "expanded"
     );
   }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    let timeoutId: number;
+
+    function applyViewportState() {
+      const isMobile = window.innerWidth <= 980;
+      setIsMobileViewport(isMobile);
+      setIsMobileSidebarOpen((current) => (isMobile ? current : false));
+    }
+
+    function handleResize() {
+      window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(applyViewportState, 80);
+    }
+
+    applyViewportState();
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileViewport || !isMobileSidebarOpen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isMobileViewport, isMobileSidebarOpen]);
 
   useEffect(() => {
     if (authUser.role !== "admin") {
@@ -114,16 +152,39 @@ export function PriceTrackingShell({
 
   return (
     <div
-      className={`priceTrackingFrame${isSidebarCollapsed || hideSidebar ? " sidebarCollapsed" : ""}`}
+      className={`priceTrackingFrame${
+        isSidebarCollapsed || hideSidebar ? " sidebarCollapsed" : ""
+      }${isMobileViewport && isMobileSidebarOpen ? " mobileSidebarOpen" : ""}`}
     >
+      {!hideSidebar && isMobileViewport && isMobileSidebarOpen ? (
+        <button
+          type="button"
+          className="sidebarMobileScrim"
+          aria-label="ปิดเมนูหลัก"
+          onClick={() => setIsMobileSidebarOpen(false)}
+        />
+      ) : null}
+
       {hideSidebar ? null : (
         <aside className="priceTrackingSidebar" aria-label="เมนูหลัก">
-          <div className="sidebarBrand">
-            <span className="sidebarBrandBadge">{companyDisplayName.slice(0, 1)}</span>
-            <div className="sidebarBrandCopy">
-              <strong>Dashboard</strong>
-              <span>{companyDisplayName}</span>
+          <div className="sidebarBrandRow">
+            <div className="sidebarBrand">
+              <span className="sidebarBrandBadge">{companyDisplayName.slice(0, 1)}</span>
+              <div className="sidebarBrandCopy">
+                <strong>Dashboard</strong>
+                <span>{companyDisplayName}</span>
+              </div>
             </div>
+            {isMobileViewport ? (
+              <button
+                type="button"
+                className="sidebarCloseButton"
+                aria-label="ปิดเมนูหลัก"
+                onClick={() => setIsMobileSidebarOpen(false)}
+              >
+                <X />
+              </button>
+            ) : null}
           </div>
 
           <nav className="sidebarNav">
@@ -140,7 +201,12 @@ export function PriceTrackingShell({
                         key={menu}
                         type="button"
                         className={`sidebarNavItem${activeMenu === menu ? " active" : ""}`}
-                        onClick={() => onMenuChange(menu)}
+                        onClick={() => {
+                          onMenuChange(menu);
+                          if (isMobileViewport) {
+                            setIsMobileSidebarOpen(false);
+                          }
+                        }}
                         title={menuMeta.label}
                       >
                         <span className="sidebarNavInitial" aria-hidden="true">
@@ -167,7 +233,12 @@ export function PriceTrackingShell({
                         key={menu}
                         type="button"
                         className={`sidebarNavItem${activeMenu === menu ? " active" : ""}`}
-                        onClick={() => onMenuChange(menu)}
+                        onClick={() => {
+                          onMenuChange(menu);
+                          if (isMobileViewport) {
+                            setIsMobileSidebarOpen(false);
+                          }
+                        }}
                         title={menuMeta.label}
                       >
                         <span className="sidebarNavInitial" aria-hidden="true">
@@ -190,8 +261,17 @@ export function PriceTrackingShell({
             authUser={authUser}
             themeMode={themeMode}
             isSidebarCollapsed={isSidebarCollapsed}
+            isMobileViewport={isMobileViewport}
+            isMobileSidebarOpen={isMobileSidebarOpen}
             onToggleTheme={onToggleTheme}
-            onToggleSidebar={() => setIsSidebarCollapsed((current) => !current)}
+            onToggleSidebar={() => {
+              if (isMobileViewport) {
+                setIsMobileSidebarOpen((current) => !current);
+                return;
+              }
+
+              setIsSidebarCollapsed((current) => !current);
+            }}
             onLogout={onLogout}
             onOpenChangePassword={onOpenChangePassword}
             pendingRequestCount={pendingRequestCount}

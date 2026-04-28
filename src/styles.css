@@ -52,12 +52,52 @@ body {
   min-width: 0;
 }
 
+.sidebarBrandRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .sidebarBrand {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 12px;
   align-items: center;
   padding: 2px 6px 4px;
+}
+
+.sidebarCloseButton {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(123, 157, 214, 0.22);
+  border-radius: 12px;
+  background: rgba(7, 17, 34, 0.8);
+  color: #bfd0ef;
+  padding: 0;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease,
+    background 0.2s ease;
+}
+
+.sidebarCloseButton:hover,
+.sidebarCloseButton:focus-visible {
+  border-color: rgba(37, 99, 235, 0.36);
+  background: rgba(53, 98, 168, 0.42);
+  color: #eef4ff;
+  outline: none;
+}
+
+.sidebarCloseButton svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
 }
 
 .sidebarBrandBadge {
@@ -188,6 +228,10 @@ body {
 }
 
 .sidebarCollapsed .priceTrackingSidebar {
+  display: none;
+}
+
+.sidebarMobileScrim {
   display: none;
 }
 
@@ -2817,6 +2861,23 @@ select {
 
 .tableBucketRow {
   gap: 5px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 3px;
+  min-width: 0;
+}
+
+.tableBucketRow .bucketFilter {
+  flex-shrink: 0;
+}
+
+.tableBucketRow::-webkit-scrollbar {
+  height: 3px;
+}
+
+.tableBucketRow::-webkit-scrollbar-thumb {
+  background: rgba(101, 141, 201, 0.35);
+  border-radius: 999px;
 }
 
 .filterInlineRow {
@@ -3281,21 +3342,38 @@ th:has(.thLabel.open) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
   border: 1px solid rgba(159, 176, 208, 0.4);
   color: #bfd0ef;
-  font-size: 0.68rem;
+  font-size: 0.72rem;
+  font-weight: 700;
   line-height: 1;
   cursor: help;
   background: rgba(18, 35, 62, 0.82);
   padding: 0;
+  touch-action: manipulation;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.hintDot:hover,
+.hintDot:focus-visible {
+  border-color: rgba(128, 221, 255, 0.5);
+  background: rgba(35, 58, 94, 0.94);
+  color: #eef4ff;
+  outline: none;
 }
 
 .hintDot.open {
   border-color: rgba(128, 221, 255, 0.55);
   color: #eef4ff;
+  background: rgba(35, 58, 94, 0.94);
 }
 
 .hintPopup {
@@ -3303,8 +3381,9 @@ th:has(.thLabel.open) {
   top: calc(100% + 10px);
   left: 0;
   z-index: 8;
-  width: min(280px, 24vw);
-  min-width: 220px;
+  width: min(240px, 22vw);
+  min-width: 180px;
+  max-width: min(240px, calc(100vw - 32px));
   padding: 10px 12px;
   border-radius: 14px;
   border: 1px solid rgba(123, 157, 214, 0.28);
@@ -3316,6 +3395,16 @@ th:has(.thLabel.open) {
   white-space: normal;
   box-shadow: 0 14px 30px rgba(2, 8, 20, 0.34);
   pointer-events: none;
+}
+
+.hintPopup.center {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.hintPopup.end {
+  left: auto;
+  right: 0;
 }
 
 tbody tr {
@@ -3348,31 +3437,68 @@ tbody tr:hover,
   }
 
   .priceTrackingSidebar {
-    position: static;
-    height: auto;
-    border-right: 0;
-    border-bottom: 1px solid rgba(123, 157, 214, 0.2);
-    padding: 10px 12px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 50;
+    width: min(320px, calc(100vw - 44px));
+    height: 100vh;
+    border-right: 1px solid rgba(123, 157, 214, 0.2);
+    border-bottom: 0;
+    padding: 18px 14px 24px;
+    box-shadow: 0 28px 60px rgba(2, 8, 20, 0.4);
+    transform: translateX(-100%);
+    transition: transform 0.24s ease;
+    overflow-y: auto;
+  }
+
+  .mobileSidebarOpen .priceTrackingSidebar {
+    transform: translateX(0);
+  }
+
+  .sidebarCollapsed .priceTrackingSidebar {
+    display: flex;
+  }
+
+  .sidebarMobileScrim {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    display: block;
+    border: 0;
+    background: rgba(8, 17, 33, 0.52);
+    backdrop-filter: blur(4px);
+    cursor: pointer;
+  }
+
+  .sidebarBrandRow {
+    align-items: center;
   }
 
   .sidebarBrand {
+    flex: 1 1 auto;
     padding: 4px 2px 0;
+  }
+
+  .sidebarCloseButton {
+    display: inline-flex;
   }
 
   .sidebarNav {
     display: grid;
     gap: 12px;
-    overflow-x: auto;
+    overflow: visible;
     padding-bottom: 2px;
   }
 
   .sidebarSectionItems {
-    display: flex;
+    display: grid;
     gap: 8px;
   }
 
   .sidebarNavItem {
-    flex: 0 0 min(240px, 82vw);
+    flex: 0 0 auto;
+    min-width: 0;
     min-height: 52px;
   }
 
@@ -3386,23 +3512,9 @@ tbody tr:hover,
   }
 
   .priceTrackingHeader {
-    align-items: stretch;
-    grid-template-columns: 1fr;
-    padding: 12px 18px;
-  }
-
-  .priceTrackingHeaderMain,
-  .topbarFilterSlot,
-  .topbarActions {
-    width: 100%;
-  }
-
-  .priceTrackingHeaderMain {
-    flex-wrap: wrap;
-  }
-
-  .topbarActions {
-    overflow-x: auto;
+    align-items: center;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    padding: 8px 14px;
   }
 
   .topbarFilterSlot {
@@ -3423,16 +3535,6 @@ tbody tr:hover,
 
   .topbarBaselineControls {
     min-width: 0;
-  }
-
-  .topbarUserMenu,
-  .topbarUser {
-    flex: 1 1 180px;
-    max-width: none;
-  }
-
-  .topbarUser {
-    width: 100%;
   }
 }
 
@@ -3471,7 +3573,8 @@ tbody tr:hover,
   }
 
   .tableFilterInputs.tableFilterControls {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+    align-items: center;
   }
 
   .compactFilterDock {
@@ -3501,6 +3604,25 @@ tbody tr:hover,
 }
 
 @media (max-width: 860px) {
+  .topbarActions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    overflow-x: visible;
+  }
+
+  .topbarActions > * {
+    flex: 0 0 auto;
+  }
+
+  .topbarCompactFilterSlot {
+    width: 100%;
+  }
+
+  .topbarCompactFilterToggle {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .topbarSharedFilter {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     padding: 6px;
@@ -3509,6 +3631,13 @@ tbody tr:hover,
   .topbarBaselineControls {
     grid-column: 1 / -1;
     grid-template-columns: auto repeat(2, minmax(0, 1fr));
+  }
+
+  .topbarSharedFilter .sharedDivisionDropdown,
+  .topbarSharedFilter .singleSelectDropdown,
+  .topbarSharedFilter .multiSelectDropdown,
+  .topbarSharedFilter .sharedFilterReset {
+    grid-column: span 1;
   }
 
   .topbarSharedFilter .sharedFilterReset {
@@ -3537,6 +3666,19 @@ tbody tr:hover,
     gap: 6px;
   }
 
+  .topbarActions {
+    gap: 8px;
+  }
+
+  .topbarUserMenu {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .topbarUser {
+    width: 100%;
+  }
+
   .priceTrackingHomeButton,
   .topbarIconButton {
     width: 34px;
@@ -3546,6 +3688,11 @@ tbody tr:hover,
   .chartSummaryPills {
     justify-content: flex-start;
     width: 100%;
+  }
+
+  .chartSummaryPills > *,
+  .panelHeaderActions > * {
+    min-width: 0;
   }
 
   .proportionChart,
@@ -3564,12 +3711,18 @@ tbody tr:hover,
     line-height: 1.45;
   }
 
+  .gridStats {
+    grid-template-columns: 1fr;
+  }
+
   .statCard {
     padding: 14px 14px 16px;
   }
 
   .statCard strong {
     font-size: 1.55rem;
+    line-height: 1.15;
+    word-break: break-word;
   }
 
   .panel {
@@ -3590,12 +3743,18 @@ tbody tr:hover,
     flex-wrap: wrap;
   }
 
+  .panelHeaderActions {
+    width: 100%;
+  }
+
   .chartRangeField {
+    width: 100%;
     flex-wrap: wrap;
   }
 
   .chartRangeField select {
-    min-width: 140px;
+    width: 100%;
+    min-width: 0;
   }
 
   .controlRow {
@@ -3614,9 +3773,14 @@ tbody tr:hover,
     grid-template-columns: 1fr;
   }
 
-  .tableFilterLadder {
+  .tableFilterInputs.tableFilterControls {
     grid-template-columns: 1fr;
-    gap: 6px;
+  }
+
+  .tableFilterLadder {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
   }
 
   .sharedFilterMenuBar {
@@ -3641,6 +3805,13 @@ tbody tr:hover,
     grid-template-columns: 1fr;
   }
 
+  .topbarSharedFilter .sharedDivisionDropdown,
+  .topbarSharedFilter .singleSelectDropdown,
+  .topbarSharedFilter .multiSelectDropdown,
+  .topbarSharedFilter .sharedFilterReset {
+    grid-column: 1;
+  }
+
   .topbarBaselineButton {
     width: 100%;
   }
@@ -3654,6 +3825,12 @@ tbody tr:hover,
     right: auto;
     width: min(100%, calc(100vw - 36px));
     max-width: min(100%, calc(100vw - 36px));
+  }
+
+  .sharedDivisionMenu,
+  .multiSelectMenu {
+    left: 0;
+    right: auto;
   }
 
   .discountDropdownOption {
@@ -3734,6 +3911,76 @@ tbody tr:hover,
 
   .authSettingsActions .authSecondaryButton,
   .authSettingsActions .authLoginButton {
+    width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .shell {
+    padding: 14px;
+  }
+
+  .priceTrackingHeader {
+    padding: 6px 8px;
+  }
+
+  .topbarUserText {
+    display: none;
+  }
+
+  .topbarUser {
+    min-height: 34px;
+    padding: 0 8px;
+    column-gap: 6px;
+    grid-template-columns: auto auto;
+  }
+
+  .topbarSharedFilter {
+    gap: 8px;
+    padding: 8px;
+    border-radius: 18px;
+  }
+
+  .topbarBaselineControls {
+    gap: 8px;
+  }
+
+  .topbarBaselineControls label {
+    padding: 6px 9px;
+  }
+
+  .hero h1 {
+    font-size: clamp(1.55rem, 8.5vw, 2.15rem);
+  }
+
+  .heroTitleNote {
+    font-size: 0.88rem;
+  }
+
+  .statCard span {
+    max-width: 100%;
+    padding-right: 0;
+  }
+
+  .statCard > .calcHelpButton {
+    position: static;
+    margin-bottom: 12px;
+  }
+
+  .segmentedControl {
+    width: 100%;
+  }
+
+  .segmentedControl button {
+    flex: 1 1 0;
+  }
+
+  .chartSummaryPills,
+  .panelHeaderActions {
+    align-items: stretch;
+  }
+
+  .chartRangeField span {
     width: 100%;
   }
 }
@@ -3824,7 +4071,9 @@ body[data-theme="light"] .tableFilterShell,
 body[data-theme="light"] .projectFilterShell,
 body[data-theme="light"] .tableWrap,
 body[data-theme="light"] .loadingScreen,
-body[data-theme="light"] .slowDataNotice {
+body[data-theme="light"] .slowDataNotice,
+body[data-theme="light"] .explanationBox,
+body[data-theme="light"] .emptyState {
   border-color: rgba(83, 112, 158, 0.22);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(247, 251, 255, 0.84));
   color: #182235;
@@ -3864,6 +4113,7 @@ body[data-theme="light"] .statCard p,
 body[data-theme="light"] .panelHeader p,
 body[data-theme="light"] .chartNote,
 body[data-theme="light"] .paginationSummary,
+body[data-theme="light"] .paginationEllipsis,
 body[data-theme="light"] .compactFilterLabel,
 body[data-theme="light"] .tableCompactLabel,
 body[data-theme="light"] .tableFilterLadderLabel,
@@ -3875,6 +4125,18 @@ body[data-theme="light"] .filterField span,
 body[data-theme="light"] .sharedDivisionDropdown > summary span,
 body[data-theme="light"] .singleSelectDropdown summary span,
 body[data-theme="light"] .multiSelectDropdown summary span {
+  color: #52627d;
+}
+
+body[data-theme="light"] .loadingScreen strong,
+body[data-theme="light"] .emptyState strong,
+body[data-theme="light"] .explanationBox strong {
+  color: #182235;
+}
+
+body[data-theme="light"] .emptyState span,
+body[data-theme="light"] .explanationBox p,
+body[data-theme="light"] .explanationBoxCollapsible summary::after {
   color: #52627d;
 }
 
@@ -3930,6 +4192,7 @@ body[data-theme="light"] .baselineHelpButton,
 body[data-theme="light"] .themeToggleButton,
 body[data-theme="light"] .clearFilterButton,
 body[data-theme="light"] .calcHelpButton,
+body[data-theme="light"] .topbarCompactFilterToggle,
 body[data-theme="light"] .discountTypeOption,
 body[data-theme="light"] .compactFilterChip,
 body[data-theme="light"] .globalChip,
@@ -4093,6 +4356,13 @@ body[data-theme="light"] .topbarSharedFilter .multiSelectDropdown summary strong
   color: #182235;
 }
 
+body[data-theme="light"] .topbarCompactFilterToggle:hover,
+body[data-theme="light"] .topbarCompactFilterToggle.open {
+  border-color: rgba(37, 99, 235, 0.34);
+  background: rgba(219, 234, 254, 0.92);
+  color: #123a76;
+}
+
 body[data-theme="light"] .priceTrackingHomeButton {
   border-color: rgba(75, 113, 170, 0.22);
   background: rgba(219, 234, 254, 0.94);
@@ -4101,6 +4371,12 @@ body[data-theme="light"] .priceTrackingHomeButton {
 
 body[data-theme="light"] .topbarIconButton,
 body[data-theme="light"] .topbarUser {
+  border-color: rgba(75, 113, 170, 0.22);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(243, 247, 255, 0.92));
+  color: #52627d;
+}
+
+body[data-theme="light"] .sidebarCloseButton {
   border-color: rgba(75, 113, 170, 0.22);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(243, 247, 255, 0.92));
   color: #52627d;
@@ -4119,7 +4395,9 @@ body[data-theme="light"] .topbarNotificationButton.hasUnread:hover {
 }
 
 body[data-theme="light"] .topbarIconButton:hover,
-body[data-theme="light"] .topbarUser:hover {
+body[data-theme="light"] .topbarUser:hover,
+body[data-theme="light"] .sidebarCloseButton:hover,
+body[data-theme="light"] .sidebarCloseButton:focus-visible {
   border-color: rgba(37, 99, 235, 0.28);
   background: linear-gradient(180deg, #ffffff, rgba(243, 247, 255, 0.96));
   color: #1f3658;
@@ -4301,4 +4579,64 @@ body[data-theme="light"] tbody tr:nth-child(odd) {
 
 body[data-theme="light"] tbody tr:hover {
   background: rgba(219, 234, 254, 0.36);
+}
+
+body[data-theme="light"] .activeRow {
+  background: rgba(219, 234, 254, 0.54);
+}
+
+body[data-theme="light"] .hintDot {
+  border-color: rgba(75, 113, 170, 0.32);
+  background: rgba(255, 255, 255, 0.9);
+  color: #2563eb;
+}
+
+body[data-theme="light"] .hintDot:hover,
+body[data-theme="light"] .hintDot:focus-visible {
+  border-color: rgba(37, 99, 235, 0.4);
+  background: rgba(219, 234, 254, 0.9);
+  color: #1d4ed8;
+}
+
+body[data-theme="light"] .hintDot.open {
+  border-color: rgba(37, 99, 235, 0.44);
+  background: rgba(219, 234, 254, 0.96);
+  color: #1d4ed8;
+}
+
+body[data-theme="light"] .hintPopup {
+  border-color: rgba(75, 113, 170, 0.22);
+  background: rgba(255, 255, 255, 0.99);
+  color: #1f3658;
+  box-shadow: 0 14px 30px rgba(72, 102, 150, 0.16);
+}
+
+body[data-theme="light"] .tableActivePill {
+  border-color: rgba(75, 113, 170, 0.22);
+  background: rgba(241, 246, 255, 0.92);
+  color: #1f3658;
+}
+
+body[data-theme="light"] .tableActivePill strong {
+  color: #2563eb;
+}
+
+body[data-theme="light"] .tableActiveFiltersHint {
+  color: #8a9bb7;
+}
+
+body[data-theme="light"] .tableLoadingState {
+  border-color: rgba(75, 113, 170, 0.22);
+  background: rgba(248, 251, 255, 0.72);
+  color: #52627d;
+}
+
+body[data-theme="light"] .tableRefreshNotice {
+  border-color: rgba(75, 113, 170, 0.22);
+  background: rgba(241, 246, 255, 0.92);
+  color: #1f3658;
+}
+
+body[data-theme="light"] .tableBucketRow::-webkit-scrollbar-thumb {
+  background: rgba(75, 113, 170, 0.28);
 }

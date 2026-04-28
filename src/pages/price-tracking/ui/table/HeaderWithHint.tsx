@@ -4,6 +4,7 @@ type HeaderWithHintProps = {
   hintKey: TableColumnHelpKey;
   label: string;
   hint: string;
+  popupAlign?: "start" | "center" | "end";
   activeHint: TableColumnHelpKey | null;
   onToggle: (key: TableColumnHelpKey) => void;
 };
@@ -12,10 +13,12 @@ export function HeaderWithHint({
   hintKey,
   label,
   hint,
+  popupAlign = "start",
   activeHint,
   onToggle
 }: HeaderWithHintProps) {
   const isOpen = activeHint === hintKey;
+  const toggleHint = () => onToggle(hintKey);
 
   return (
     <span className={`thLabel ${isOpen ? "open" : ""}`}>
@@ -25,14 +28,19 @@ export function HeaderWithHint({
         className={`hintDot ${isOpen ? "open" : ""}`}
         aria-label={hint}
         aria-expanded={isOpen}
-        onClick={(event) => {
+        onPointerDown={(event) => {
+          event.preventDefault();
           event.stopPropagation();
-          onToggle(hintKey);
+          toggleHint();
+        }}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
         }}
       >
         i
       </button>
-      {isOpen ? <span className="hintPopup">{hint}</span> : null}
+      {isOpen ? <span className={`hintPopup ${popupAlign}`}>{hint}</span> : null}
     </span>
   );
 }

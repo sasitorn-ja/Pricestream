@@ -174,6 +174,7 @@ export function ProjectsTableSection({
                       hintKey="division"
                       label="Division"
                       hint={tableColumnHelp.division}
+                      popupAlign="start"
                       activeHint={activeHint}
                       onToggle={onToggleHint}
                     />
@@ -183,6 +184,7 @@ export function ProjectsTableSection({
                       hintKey="segment"
                       label="Segment"
                       hint={tableColumnHelp.segment}
+                      popupAlign="center"
                       activeHint={activeHint}
                       onToggle={onToggleHint}
                     />
@@ -192,6 +194,7 @@ export function ProjectsTableSection({
                       hintKey="ladder"
                       label="Ladder"
                       hint={tableColumnHelp.ladder}
+                      popupAlign="center"
                       activeHint={activeHint}
                       onToggle={onToggleHint}
                     />
@@ -201,6 +204,7 @@ export function ProjectsTableSection({
                       hintKey="baseline"
                       label="Baseline"
                       hint={tableColumnHelp.baseline}
+                      popupAlign="center"
                       activeHint={activeHint}
                       onToggle={onToggleHint}
                     />
@@ -210,6 +214,7 @@ export function ProjectsTableSection({
                       hintKey="current"
                       label="Current"
                       hint={selectedDay ? "net price ของโครงการในวันที่เลือก" : tableColumnHelp.current}
+                      popupAlign="center"
                       activeHint={activeHint}
                       onToggle={onToggleHint}
                     />
@@ -219,6 +224,7 @@ export function ProjectsTableSection({
                       hintKey="increase"
                       label="Increase vs Baseline"
                       hint={tableColumnHelp.increase}
+                      popupAlign="center"
                       activeHint={activeHint}
                       onToggle={onToggleHint}
                     />
@@ -228,6 +234,7 @@ export function ProjectsTableSection({
                       hintKey="baselineDisc"
                       label="Disc Baseline (%)"
                       hint={tableColumnHelp.baselineDisc}
+                      popupAlign="end"
                       activeHint={activeHint}
                       onToggle={onToggleHint}
                     />
@@ -237,6 +244,7 @@ export function ProjectsTableSection({
                       hintKey="currentDisc"
                       label="Disc Current (%)"
                       hint={tableColumnHelp.currentDisc}
+                      popupAlign="end"
                       activeHint={activeHint}
                       onToggle={onToggleHint}
                     />
@@ -246,6 +254,7 @@ export function ProjectsTableSection({
                       hintKey="discount"
                       label="Discount Drop (%)"
                       hint={tableColumnHelp.discount}
+                      popupAlign="end"
                       activeHint={activeHint}
                       onToggle={onToggleHint}
                     />
@@ -255,6 +264,7 @@ export function ProjectsTableSection({
                       hintKey="latestDay"
                       label={selectedDay ? "Selected day" : "Day"}
                       hint={selectedDay ? "วันที่ที่ใช้กรองในตารางนี้" : tableColumnHelp.latestDay}
+                      popupAlign="end"
                       activeHint={activeHint}
                       onToggle={onToggleHint}
                     />

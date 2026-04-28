@@ -1,14 +1,16 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { PriceTrackingIcon } from "./PriceTrackingIcon";
 import { type AuthUser } from "../../services/auth/authUser";
 
-const COMPACT_FILTER_BREAKPOINT = 860;
+const COMPACT_FILTER_BREAKPOINT = 1200;
 
 type PriceTrackingNavigationProps = {
   authUser: AuthUser;
   themeMode: "dark" | "light";
   isSidebarCollapsed: boolean;
+  isMobileViewport?: boolean;
+  isMobileSidebarOpen?: boolean;
   onToggleTheme: () => void;
   onToggleSidebar: () => void;
   onLogout: () => void;
@@ -24,6 +26,8 @@ export function PriceTrackingNavigation({
   authUser,
   themeMode,
   isSidebarCollapsed,
+  isMobileViewport = false,
+  isMobileSidebarOpen = false,
   onToggleTheme,
   onToggleSidebar,
   onLogout,
@@ -37,22 +41,39 @@ export function PriceTrackingNavigation({
   const [isCompactFilterScreen, setIsCompactFilterScreen] = useState(false);
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const wasCompactFilterScreenRef = useRef(false);
 
   useEffect(() => {
-    function syncViewportState() {
+    let timeoutId: number;
+
+    function applyViewportState() {
       const compactScreen = window.innerWidth <= COMPACT_FILTER_BREAKPOINT;
+      const wasCompactScreen = wasCompactFilterScreenRef.current;
+
       setIsCompactFilterScreen(compactScreen);
-      setIsFilterMenuOpen((current) => (compactScreen ? current : false));
+      if (!compactScreen || !wasCompactScreen) {
+        setIsFilterMenuOpen(false);
+      }
+      wasCompactFilterScreenRef.current = compactScreen;
     }
 
-    syncViewportState();
-    window.addEventListener("resize", syncViewportState);
+    function handleResize() {
+      window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(applyViewportState, 80);
+    }
 
-    return () => window.removeEventListener("resize", syncViewportState);
+    applyViewportState();
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.clearTimeout(timeoutId);
+    };
   }, []);
 
   const shouldShowInlineFilter = Boolean(filterMenu) && !isCompactFilterScreen;
   const shouldShowCompactFilterToggle = Boolean(filterMenu) && isCompactFilterScreen;
+  const isSidebarVisible = isMobileViewport ? isMobileSidebarOpen : !isSidebarCollapsed;
 
   return (
     <>
@@ -62,10 +83,10 @@ export function PriceTrackingNavigation({
             type="button"
             className="topbarIconButton sidebarTopbarToggle"
             onClick={onToggleSidebar}
-            aria-label={isSidebarCollapsed ? "แสดงเมนูหลัก" : "ซ่อนเมนูหลัก"}
-            title={isSidebarCollapsed ? "แสดงเมนูหลัก" : "ซ่อนเมนูหลัก"}
+            aria-label={isSidebarVisible ? "ซ่อนเมนูหลัก" : "แสดงเมนูหลัก"}
+            title={isSidebarVisible ? "ซ่อนเมนูหลัก" : "แสดงเมนูหลัก"}
           >
-            {isSidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+            {isSidebarVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
           </button>
         ) : null}
       </div>
