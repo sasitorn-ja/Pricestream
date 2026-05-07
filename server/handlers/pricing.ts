@@ -211,6 +211,7 @@ const SNAPSHOT_SINGLE_THRESHOLD_BYTES = 5 * 1024 * 1024;
 const SNAPSHOT_PROJECT_TREND_THRESHOLD_BYTES = 15 * 1024 * 1024;
 const SNAPSHOT_HARD_STOP_THRESHOLD_BYTES = 25 * 1024 * 1024;
 const SNAPSHOT_CHUNK_TARGET_BYTES = 4 * 1024 * 1024;
+const SNAPSHOT_DB_PERSIST_CONCURRENCY = 4;
 
 function readNumberEnv(name: string) {
   const rawValue = process.env[name]?.trim();
@@ -311,6 +312,27 @@ let lastServedSource = "empty";
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+) {
+  const queue = [...items];
+  const workers = Array.from(
+    { length: Math.min(Math.max(1, concurrency), queue.length) },
+    async () => {
+      while (queue.length > 0) {
+        const item = queue.shift();
+        if (item) {
+          await worker(item);
+        }
+      }
+    }
+  );
+
+  await Promise.all(workers);
 }
 
 function toIsoTime(value = Date.now()) {
@@ -1521,7 +1543,7 @@ async function persistSnapshotRowsToDb(
   const sql = getSql();
   const startedAt = performance.now();
 
-  for (const envelope of envelopes) {
+  await runWithConcurrency(envelopes, SNAPSHOT_DB_PERSIST_CONCURRENCY, async (envelope) => {
     await sql`
       insert into app_pricing_snapshots (
         snapshot_key,
@@ -1562,7 +1584,7 @@ async function persistSnapshotRowsToDb(
         last_error = excluded.last_error,
         updated_at = now()
     `;
-  }
+  });
 
   const companies = Array.from(new Set(envelopes.map((envelope) => envelope.company)));
   for (const company of companies) {
@@ -1592,6 +1614,10 @@ async function persistSnapshotRowsToDb(
 }
 
 async function persistBuiltSnapshotsToLocalFile(envelopesByCompany: Record<string, SnapshotEnvelope[]>) {
+  if (process.env.VERCEL) {
+    return;
+  }
+
   await persistLocalSnapshots(envelopesByCompany);
 }
 
