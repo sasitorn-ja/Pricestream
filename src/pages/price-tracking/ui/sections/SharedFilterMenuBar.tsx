@@ -74,17 +74,19 @@ export function SharedFilterMenuBar({
     availableDivisions.length > 0 &&
     selectedDivisions.length === availableDivisions.length &&
     availableDivisions.every((division) => selectedDivisions.includes(division));
+  const shouldTreatDivisionsAsAll =
+    selectedDivisions.length === 0 || hasSelectedEveryDivision;
   const divisionSummary =
     selectedFcNames.length > 0
       ? summarizeMultiSelect(
-          hasSelectedEveryDivision
+          shouldTreatDivisionsAsAll
             ? selectedFcNames
             : [...selectedDivisions, ...selectedFcNames],
           "ไม่เลือก FC"
         )
-      : hasSelectedEveryDivision
+      : shouldTreatDivisionsAsAll
         ? "ทั้งหมด"
-        : summarizeMultiSelect(selectedDivisions, "ไม่เลือก");
+        : summarizeMultiSelect(selectedDivisions, "ทั้งหมด");
 
   const openDatePicker = (input: HTMLInputElement | null) => {
     if (!input) {
@@ -111,13 +113,13 @@ export function SharedFilterMenuBar({
       )}
       aria-label="ตัวกรองกราฟ"
     >
-      <div className="min-w-0 overflow-x-auto overflow-y-visible min-[1280px]:overflow-x-visible">
-        <div className="flex min-w-max flex-wrap items-center gap-2 min-[1280px]:min-w-full min-[1280px]:flex-nowrap">
-          <div className="flex min-w-0 flex-1 basis-full flex-wrap items-center gap-2 min-[1280px]:basis-auto min-[1280px]:flex-nowrap min-[1280px]:shrink-0">
-            <Button variant="outline" size="sm" className="h-10 shrink-0 rounded-[14px] px-4 text-xs font-semibold" onClick={onOpenBaselineHelp}>
+      <div className="min-w-0 overflow-x-auto overflow-y-visible min-[1080px]:overflow-x-visible">
+        <div className="flex min-w-max items-center gap-2 min-[1080px]:min-w-0 min-[1080px]:w-full min-[1080px]:flex-nowrap">
+          <div className="flex min-w-0 shrink-0 items-center gap-2">
+            <Button variant="outline" size="sm" className="h-9 shrink-0 rounded-[14px] px-3 text-[11px] font-semibold xl:h-10 xl:px-4 xl:text-xs" onClick={onOpenBaselineHelp}>
               Baseline
             </Button>
-            <label className="flex min-w-0 items-center gap-1.5 max-sm:w-full">
+            <label className="flex min-w-0 items-center gap-1.5">
               <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
                 เริ่ม
               </span>
@@ -127,12 +129,12 @@ export function SharedFilterMenuBar({
                   type="date"
                   value={selectedBaselineStart}
                   onChange={(event) => onBaselineStartChange(event.target.value)}
-                  className="pricing-date-input h-10 w-full min-w-[136px] rounded-[14px] pr-10 text-[12px] md:min-w-[148px]"
+                  className="pricing-date-input h-9 w-[138px] rounded-[14px] pr-8 text-[11px] xl:h-10 xl:w-[148px] xl:pr-10 xl:text-[12px]"
                 />
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="absolute top-1 right-1 h-8 w-8 rounded-[10px]"
+                  className="absolute top-1 right-1 h-7 w-7 rounded-[10px] xl:h-8 xl:w-8"
                   aria-label="เลือกวันที่เริ่ม"
                   onClick={() => openDatePicker(baselineStartInputRef.current)}
                 >
@@ -140,7 +142,7 @@ export function SharedFilterMenuBar({
                 </Button>
               </div>
             </label>
-            <label className="flex min-w-0 items-center gap-1.5 max-sm:w-full">
+            <label className="flex min-w-0 items-center gap-1.5">
               <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
                 ถึง
               </span>
@@ -150,12 +152,12 @@ export function SharedFilterMenuBar({
                   type="date"
                   value={selectedBaselineEnd}
                   onChange={(event) => onBaselineEndChange(event.target.value)}
-                  className="pricing-date-input h-10 w-full min-w-[136px] rounded-[14px] pr-10 text-[12px] md:min-w-[148px]"
+                  className="pricing-date-input h-9 w-[138px] rounded-[14px] pr-8 text-[11px] xl:h-10 xl:w-[148px] xl:pr-10 xl:text-[12px]"
                 />
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="absolute top-1 right-1 h-8 w-8 rounded-[10px]"
+                  className="absolute top-1 right-1 h-7 w-7 rounded-[10px] xl:h-8 xl:w-8"
                   aria-label="เลือกวันที่สิ้นสุด"
                   onClick={() => openDatePicker(baselineEndInputRef.current)}
                 >
@@ -166,7 +168,7 @@ export function SharedFilterMenuBar({
           </div>
 
           <details
-            className="relative min-w-0 basis-full sm:basis-[220px] min-[1280px]:basis-[220px] min-[1280px]:shrink-0"
+            className="relative min-w-0 flex-[1_1_160px]"
             onToggle={(event) => {
               const currentDropdown = event.currentTarget;
 
@@ -181,7 +183,7 @@ export function SharedFilterMenuBar({
               });
             }}
           >
-            <summary className="flex h-10 min-w-0 list-none cursor-pointer items-center justify-between gap-1.5 rounded-[16px] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-1.5 text-left text-[12px] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] [&::-webkit-details-marker]:hidden">
+            <summary className="flex h-9 min-w-0 list-none cursor-pointer items-center justify-between gap-1.5 rounded-[16px] border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-left text-[11px] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] xl:h-10 xl:px-3.5 xl:text-[12px] [&::-webkit-details-marker]:hidden">
               <span className="shrink-0 truncate text-[var(--muted-foreground)]">Division / FC</span>
               <span className="flex min-w-0 flex-1 items-center justify-end gap-2">
                 <strong className="min-w-0 truncate">{divisionSummary}</strong>
@@ -208,7 +210,7 @@ export function SharedFilterMenuBar({
             options={availableSegments}
             selectedValues={selectedSegments}
             fallbackLabel="ทุก segment"
-            className="min-w-0 basis-full sm:basis-[180px] min-[1280px]:shrink-0"
+            className="min-w-0 flex-[1_1_132px]"
             onToggle={onToggleSegment}
             onClear={onClearSegments}
           />
@@ -217,7 +219,7 @@ export function SharedFilterMenuBar({
             options={availableChannels}
             selectedValues={selectedChannels}
             fallbackLabel="ทุก channel"
-            className="min-w-0 basis-full sm:basis-[180px] min-[1280px]:shrink-0"
+            className="min-w-0 flex-[1_1_132px]"
             onToggle={onToggleChannel}
             onClear={onClearChannels}
           />
@@ -226,7 +228,7 @@ export function SharedFilterMenuBar({
             options={availableDiscountTypes}
             selectedValues={selectedDiscountTypes}
             fallbackLabel="ทุก discount"
-            className="min-w-0 basis-full sm:basis-[200px] min-[1280px]:shrink-0"
+            className="min-w-0 flex-[1_1_150px]"
             menuClassName="min-w-[320px]"
             onToggle={onToggleDiscountType}
             onClear={onClearDiscountTypes}
@@ -234,7 +236,7 @@ export function SharedFilterMenuBar({
 
           <Button
             variant="outline"
-            className="h-10 w-full shrink-0 rounded-[16px] px-4 text-xs sm:w-auto min-[1280px]:w-auto"
+            className="h-9 shrink-0 rounded-[16px] px-3 text-[11px] xl:h-10 xl:px-4 xl:text-xs"
             onClick={onResetSharedFilters}
           >
             ล้าง

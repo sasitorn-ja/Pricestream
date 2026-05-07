@@ -26,7 +26,12 @@ import {
 } from "../../shared/appConfig.js";
 
 type SnapshotCompany = "CPAC" | "QMIX";
-type SnapshotKind = "single" | "overview" | "projects" | "project-trend" | "lock";
+type SnapshotBaseKind = "single" | "overview" | "projects" | "project-trend";
+type SnapshotProjectsChunkGroup = "projectsLatest" | "dailyProjects" | "metricRecords";
+type SnapshotProjectsChunkKind = `projects:${SnapshotProjectsChunkGroup}:${number}`;
+type SnapshotProjectTrendChunkKind = `project-trend:entries:${number}`;
+type SnapshotChunkKind = SnapshotProjectsChunkKind | SnapshotProjectTrendChunkKind;
+type SnapshotKind = SnapshotBaseKind | SnapshotChunkKind | "lock";
 type SnapshotStrategy =
   | "single"
   | "overview+projects"
@@ -75,6 +80,19 @@ type SnapshotProjectTrendPayload = {
   projectTrendMap: Record<string, ProjectTrendRow[]>;
 };
 
+type SnapshotProjectsChunkPayload = {
+  group: SnapshotProjectsChunkGroup;
+  chunkIndex: number;
+  chunkCount: number;
+  rows: ProjectRow[] | CompactMetricRecord[];
+};
+
+type SnapshotProjectTrendChunkPayload = {
+  chunkIndex: number;
+  chunkCount: number;
+  entries: Array<[string, ProjectTrendRow[]]>;
+};
+
 type SnapshotSinglePayload = SnapshotOverviewPayload &
   SnapshotProjectsPayload &
   SnapshotProjectTrendPayload;
@@ -86,7 +104,15 @@ type SnapshotPayloadByKind = {
   "project-trend": SnapshotProjectTrendPayload;
 };
 
-type SnapshotEnvelope<K extends keyof SnapshotPayloadByKind> = {
+type SnapshotChunkPayloadByKind = {
+  [K in SnapshotProjectsChunkKind]: SnapshotProjectsChunkPayload;
+} & {
+  [K in SnapshotProjectTrendChunkKind]: SnapshotProjectTrendChunkPayload;
+};
+
+type SnapshotPayloadByEnvelopeKind = SnapshotPayloadByKind & SnapshotChunkPayloadByKind;
+
+type SnapshotEnvelope<K extends keyof SnapshotPayloadByEnvelopeKind = keyof SnapshotPayloadByEnvelopeKind> = {
   schemaVersion: number;
   company: SnapshotCompany;
   kind: K;
@@ -97,7 +123,7 @@ type SnapshotEnvelope<K extends keyof SnapshotPayloadByKind> = {
   compactRecordCount: number;
   snapshotBytes: number;
   contentHash: string;
-  payload: SnapshotPayloadByKind[K];
+  payload: SnapshotPayloadByEnvelopeKind[K];
 };
 
 type LoadedCompanySnapshot = {
@@ -164,7 +190,7 @@ type CompanyBenchmarkMetrics = {
 type SnapshotDbRow = {
   snapshot_key: string;
   company: string;
-  kind: SnapshotKind;
+  kind: string;
   snapshot_json: unknown;
   record_count: number | null;
   snapshot_bytes: number | null;
@@ -183,6 +209,7 @@ const SNAPSHOT_SCHEMA_VERSION = 1;
 const SNAPSHOT_SINGLE_THRESHOLD_BYTES = 5 * 1024 * 1024;
 const SNAPSHOT_PROJECT_TREND_THRESHOLD_BYTES = 15 * 1024 * 1024;
 const SNAPSHOT_HARD_STOP_THRESHOLD_BYTES = 25 * 1024 * 1024;
+const SNAPSHOT_CHUNK_TARGET_BYTES = 4 * 1024 * 1024;
 
 function readNumberEnv(name: string) {
   const rawValue = process.env[name]?.trim();
@@ -329,7 +356,7 @@ function normalizeCompany(company = ""): SnapshotCompany {
   return "CPAC";
 }
 
-function getSnapshotKey(company: string, kind: SnapshotKind) {
+function getSnapshotKey(company: string, kind: string) {
   return `pricing:${company}:${kind}`;
 }
 
@@ -381,16 +408,65 @@ function pushRollingMetric(collection: Map<SnapshotCompany, RollingStats>, compa
 
 function getRollingMetricSummary(collection: Map<SnapshotCompany, RollingStats>, company: SnapshotCompany) {
   const values = collection.get(company)?.values ?? [];
+  const latestValue = values.length > 0 ? values[values.length - 1] ?? 0 : 0;
   return {
     count: values.length,
     p95: percentile(values, 0.95),
     p99: percentile(values, 0.99),
-    latest: values.at(-1) ?? 0
+    latest: latestValue
   };
 }
 
 function hashJson(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function getSerializedBytes(value: unknown) {
+  return Buffer.byteLength(JSON.stringify(value));
+}
+
+function isProjectsChunkEnvelope(
+  envelope: SnapshotEnvelope
+): envelope is SnapshotEnvelope<SnapshotProjectsChunkKind> {
+  return envelope.kind.startsWith("projects:");
+}
+
+function isProjectTrendChunkEnvelope(
+  envelope: SnapshotEnvelope
+): envelope is SnapshotEnvelope<SnapshotProjectTrendChunkKind> {
+  return envelope.kind.startsWith("project-trend:entries:");
+}
+
+function getProjectsChunkKind(group: SnapshotProjectsChunkGroup, chunkIndex: number): SnapshotProjectsChunkKind {
+  return `projects:${group}:${chunkIndex}` as SnapshotProjectsChunkKind;
+}
+
+function getProjectTrendChunkKind(chunkIndex: number): SnapshotProjectTrendChunkKind {
+  return `project-trend:entries:${chunkIndex}` as SnapshotProjectTrendChunkKind;
+}
+
+function chunkBySerializedBytes<T>(items: T[], maxBytes: number) {
+  const chunks: T[][] = [];
+  let current: T[] = [];
+  let currentBytes = 2;
+
+  for (const item of items) {
+    const itemBytes = getSerializedBytes(item) + 1;
+    if (current.length > 0 && currentBytes + itemBytes > maxBytes) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 2;
+    }
+
+    current.push(item);
+    currentBytes += itemBytes;
+  }
+
+  if (current.length > 0 || items.length === 0) {
+    chunks.push(current);
+  }
+
+  return chunks;
 }
 
 function normalizeFilterValues(values: string[] = []) {
@@ -665,21 +741,78 @@ async function ensureSnapshotSchema() {
 async function readPersistedLocalSnapshots() {
   try {
     const raw = await readFile(PERSISTED_CACHE_PATH, "utf8");
-    const parsed = JSON.parse(raw) as Record<string, SnapshotEnvelope<keyof SnapshotPayloadByKind>[]>;
+    const parsed = JSON.parse(raw) as Record<string, SnapshotEnvelope[]>;
     return parsed;
   } catch {
     return {};
   }
 }
 
-async function persistLocalSnapshots(entries: Record<string, SnapshotEnvelope<keyof SnapshotPayloadByKind>[]>) {
+async function persistLocalSnapshots(entries: Record<string, SnapshotEnvelope[]>) {
   await mkdir(path.dirname(PERSISTED_CACHE_PATH), { recursive: true });
   await writeFile(PERSISTED_CACHE_PATH, JSON.stringify(entries));
 }
 
+function buildProjectsPayloadFromChunkEnvelopes(envelopes: SnapshotEnvelope[]): SnapshotProjectsPayload | null {
+  const chunks = envelopes.filter(isProjectsChunkEnvelope);
+  if (chunks.length === 0) {
+    return null;
+  }
+
+  const projectsLatest: ProjectRow[] = [];
+  const dailyProjects: ProjectRow[] = [];
+  const metricRecords: CompactMetricRecord[] = [];
+
+  for (const group of ["projectsLatest", "dailyProjects", "metricRecords"] as const) {
+    const groupChunks = chunks
+      .filter((envelope) => envelope.payload.group === group)
+      .sort((left, right) => left.payload.chunkIndex - right.payload.chunkIndex);
+    const chunkCount = groupChunks[0]?.payload.chunkCount ?? 0;
+
+    if (groupChunks.length !== chunkCount) {
+      return null;
+    }
+
+    for (const envelope of groupChunks) {
+      if (group === "metricRecords") {
+        metricRecords.push(...(envelope.payload.rows as CompactMetricRecord[]));
+      } else if (group === "dailyProjects") {
+        dailyProjects.push(...(envelope.payload.rows as ProjectRow[]));
+      } else {
+        projectsLatest.push(...(envelope.payload.rows as ProjectRow[]));
+      }
+    }
+  }
+
+  return {
+    projectsLatest,
+    dailyProjects,
+    metricRecords
+  };
+}
+
+function buildProjectTrendPayloadFromChunkEnvelopes(envelopes: SnapshotEnvelope[]): SnapshotProjectTrendPayload | null {
+  const chunks = envelopes
+    .filter(isProjectTrendChunkEnvelope)
+    .sort((left, right) => left.payload.chunkIndex - right.payload.chunkIndex);
+
+  if (chunks.length === 0) {
+    return null;
+  }
+
+  const chunkCount = chunks[0]?.payload.chunkCount ?? 0;
+  if (chunks.length !== chunkCount) {
+    return null;
+  }
+
+  return {
+    projectTrendMap: Object.fromEntries(chunks.flatMap((chunk) => chunk.payload.entries))
+  };
+}
+
 function buildLoadedSnapshotFromEnvelopes(
   company: SnapshotCompany,
-  envelopes: SnapshotEnvelope<keyof SnapshotPayloadByKind>[]
+  envelopes: SnapshotEnvelope[]
 ): LoadedCompanySnapshot | null {
   const singleEnvelope = envelopes.find((envelope) => envelope.kind === "single") as
     | SnapshotEnvelope<"single">
@@ -726,7 +859,38 @@ function buildLoadedSnapshotFromEnvelopes(
   }
 
   if (!overviewEnvelope || !projectsEnvelope) {
-    return null;
+    const chunkedProjectsPayload = buildProjectsPayloadFromChunkEnvelopes(envelopes);
+    if (!overviewEnvelope || !chunkedProjectsPayload) {
+      return null;
+    }
+
+    const chunkedProjectTrendPayload = buildProjectTrendPayloadFromChunkEnvelopes(envelopes);
+    return {
+      company,
+      strategy: overviewEnvelope.strategy,
+      fetchedAt: overviewEnvelope.fetchedAt,
+      generatedAt: overviewEnvelope.generatedAt,
+      rawRecordCount: overviewEnvelope.rawRecordCount,
+      compactRecordCount: overviewEnvelope.compactRecordCount,
+      overview: overviewEnvelope.payload,
+      projects: chunkedProjectsPayload,
+      projectTrendMap:
+        projectTrendEnvelope?.payload.projectTrendMap ??
+        chunkedProjectTrendPayload?.projectTrendMap ??
+        buildProjectTrendMapFromDailyProjects(chunkedProjectsPayload.dailyProjects),
+      snapshotBytes: {
+        single: 0,
+        overview: overviewEnvelope.snapshotBytes,
+        projects: envelopes
+          .filter(isProjectsChunkEnvelope)
+          .reduce((sum, envelope) => sum + envelope.snapshotBytes, 0),
+        "project-trend":
+          projectTrendEnvelope?.snapshotBytes ??
+          envelopes
+            .filter(isProjectTrendChunkEnvelope)
+            .reduce((sum, envelope) => sum + envelope.snapshotBytes, 0)
+      }
+    };
   }
 
   return {
@@ -785,7 +949,7 @@ async function buildSnapshotsFromLegacyRecords() {
     jsonParseMs: 0,
     compactMetricsBuildMs: compactMetrics.durationMs
   };
-  const envelopesByCompany: Record<string, SnapshotEnvelope<keyof SnapshotPayloadByKind>[]> = {
+  const envelopesByCompany: Record<string, SnapshotEnvelope[]> = {
     CPAC: buildSnapshotEnvelopes(
       "CPAC",
       scopeMetricsToCompany(compactMetrics.records, "CPAC"),
@@ -818,7 +982,11 @@ async function loadCompanySnapshotFromDb(company: SnapshotCompany) {
     select *
     from app_pricing_snapshots
     where company = ${company}
-      and kind in ('single', 'overview', 'projects', 'project-trend')
+      and (
+        kind in ('single', 'overview', 'projects', 'project-trend')
+        or kind like 'projects:%'
+        or kind like 'project-trend:entries:%'
+      )
   `) as SnapshotDbRow[];
   const neonReadMs = roundMs(startedAt);
   pushRollingMetric(rollingNeonReadMetricsByCompany, company, neonReadMs);
@@ -827,70 +995,10 @@ async function loadCompanySnapshotFromDb(company: SnapshotCompany) {
     return null;
   }
 
-  const singleRow = rows.find((row) => row.kind === "single");
-  const overviewRow = rows.find((row) => row.kind === "overview");
-  const projectsRow = rows.find((row) => row.kind === "projects");
-  const projectTrendRow = rows.find((row) => row.kind === "project-trend");
-
-  if (singleRow) {
-    const envelope = singleRow.snapshot_json as SnapshotEnvelope<"single">;
-    return {
-      company,
-      strategy: envelope.strategy,
-      fetchedAt: envelope.fetchedAt,
-      generatedAt: envelope.generatedAt,
-      rawRecordCount: envelope.rawRecordCount,
-      compactRecordCount: envelope.compactRecordCount,
-      overview: {
-        metadata: envelope.payload.metadata,
-        summary: envelope.payload.summary,
-        summaryByDay: envelope.payload.summaryByDay,
-        trend: envelope.payload.trend,
-        divisionPriceTrend: envelope.payload.divisionPriceTrend,
-        availableFilters: envelope.payload.availableFilters
-      },
-      projects: {
-        projectsLatest: envelope.payload.projectsLatest,
-        dailyProjects: envelope.payload.dailyProjects,
-        metricRecords: envelope.payload.metricRecords
-      },
-      projectTrendMap: envelope.payload.projectTrendMap,
-      snapshotBytes: {
-        single: envelope.snapshotBytes,
-        overview: envelope.snapshotBytes,
-        projects: envelope.snapshotBytes,
-        "project-trend": envelope.snapshotBytes
-      }
-    } satisfies LoadedCompanySnapshot;
-  }
-
-  if (!overviewRow || !projectsRow) {
-    return null;
-  }
-
-  const overviewEnvelope = overviewRow.snapshot_json as SnapshotEnvelope<"overview">;
-  const projectsEnvelope = projectsRow.snapshot_json as SnapshotEnvelope<"projects">;
-  const projectTrendEnvelope = projectTrendRow?.snapshot_json as SnapshotEnvelope<"project-trend"> | undefined;
-
-  return {
+  return buildLoadedSnapshotFromEnvelopes(
     company,
-    strategy: overviewEnvelope.strategy,
-    fetchedAt: overviewEnvelope.fetchedAt,
-    generatedAt: overviewEnvelope.generatedAt,
-    rawRecordCount: overviewEnvelope.rawRecordCount,
-    compactRecordCount: overviewEnvelope.compactRecordCount,
-    overview: overviewEnvelope.payload,
-    projects: projectsEnvelope.payload,
-    projectTrendMap:
-      projectTrendEnvelope?.payload.projectTrendMap ??
-      buildProjectTrendMapFromDailyProjects(projectsEnvelope.payload.dailyProjects),
-    snapshotBytes: {
-      single: 0,
-      overview: overviewEnvelope.snapshotBytes,
-      projects: projectsEnvelope.snapshotBytes,
-      "project-trend": projectTrendEnvelope?.snapshotBytes ?? 0
-    }
-  } satisfies LoadedCompanySnapshot;
+    rows.map((row) => row.snapshot_json as SnapshotEnvelope)
+  );
 }
 
 async function hydrateCompanySnapshot(company: SnapshotCompany) {
@@ -986,15 +1094,9 @@ async function getSnapshotSource(
   warmRemoteSnapshot();
 
   if (snapshot && pendingRefreshPromise) {
-    try {
-      await Promise.race([pendingRefreshPromise, wait(DATA_STRICT_REFRESH_WAIT_MS)]);
-      snapshot = await hydrateCompanySnapshot(company);
-      if (shouldTreatSnapshotAsFresh(snapshot)) {
-        lastServedSource = "fresh_after_stale_wait";
-        return snapshot;
-      }
-    } catch {
-      // Ignore and continue with the stale snapshot fallback below.
+    if (!options.strictFresh && isWithinServeStaleWindow(snapshot)) {
+      lastServedSource = "stale_fallback_refreshing";
+      return snapshot;
     }
   }
 
@@ -1233,6 +1335,76 @@ function determineSnapshotStrategy(snapshotBytes: {
   return "overview+projects+project-trend";
 }
 
+function buildEnvelope<K extends keyof SnapshotPayloadByEnvelopeKind>(
+  common: Omit<
+    SnapshotEnvelope<K>,
+    "kind" | "snapshotBytes" | "contentHash" | "payload"
+  >,
+  kind: K,
+  payload: SnapshotPayloadByEnvelopeKind[K]
+): SnapshotEnvelope<K> {
+  return {
+    ...common,
+    kind,
+    snapshotBytes: getSerializedBytes(payload),
+    contentHash: hashJson(payload),
+    payload
+  };
+}
+
+function buildProjectsChunkEnvelopes(
+  common: Omit<
+    SnapshotEnvelope<SnapshotProjectsChunkKind>,
+    "kind" | "snapshotBytes" | "contentHash" | "payload"
+  >,
+  payload: SnapshotProjectsPayload
+) {
+  const envelopes: SnapshotEnvelope<SnapshotProjectsChunkKind>[] = [];
+
+  function appendChunks<T extends ProjectRow | CompactMetricRecord>(
+    group: SnapshotProjectsChunkGroup,
+    rows: T[]
+  ) {
+    const chunks = chunkBySerializedBytes(rows, SNAPSHOT_CHUNK_TARGET_BYTES);
+    chunks.forEach((chunkRows, chunkIndex) => {
+      const chunkPayload: SnapshotProjectsChunkPayload = {
+        group,
+        chunkIndex,
+        chunkCount: chunks.length,
+        rows:
+          group === "metricRecords"
+            ? (chunkRows as CompactMetricRecord[])
+            : (chunkRows as ProjectRow[])
+      };
+      envelopes.push(buildEnvelope(common, getProjectsChunkKind(group, chunkIndex), chunkPayload));
+    });
+  }
+
+  appendChunks("projectsLatest", payload.projectsLatest);
+  appendChunks("dailyProjects", payload.dailyProjects);
+  appendChunks("metricRecords", payload.metricRecords);
+
+  return envelopes;
+}
+
+function buildProjectTrendChunkEnvelopes(
+  common: Omit<
+    SnapshotEnvelope<SnapshotProjectTrendChunkKind>,
+    "kind" | "snapshotBytes" | "contentHash" | "payload"
+  >,
+  payload: SnapshotProjectTrendPayload
+) {
+  const entries = Object.entries(payload.projectTrendMap);
+  const chunks = chunkBySerializedBytes(entries, SNAPSHOT_CHUNK_TARGET_BYTES);
+  return chunks.map((entriesChunk, chunkIndex) =>
+    buildEnvelope(common, getProjectTrendChunkKind(chunkIndex), {
+      chunkIndex,
+      chunkCount: chunks.length,
+      entries: entriesChunk
+    })
+  );
+}
+
 function buildSnapshotEnvelopes(
   company: SnapshotCompany,
   records: CompactMetricRecord[],
@@ -1298,40 +1470,28 @@ function buildSnapshotEnvelopes(
     compactRecordCount: records.length
   };
 
-  const envelopes: SnapshotEnvelope<keyof SnapshotPayloadByKind>[] = [];
+  const envelopes: SnapshotEnvelope[] = [];
+  const commonEnvelope = {
+    ...common
+  };
 
   if (strategy === "single") {
-    envelopes.push({
-      ...common,
-      kind: "single",
-      snapshotBytes: snapshotBytes.single,
-      contentHash: hashJson(singlePayload),
-      payload: singlePayload
-    });
+    envelopes.push(buildEnvelope(commonEnvelope, "single", singlePayload));
   } else {
-    envelopes.push({
-      ...common,
-      kind: "overview",
-      snapshotBytes: snapshotBytes.overview,
-      contentHash: hashJson(overviewPayload),
-      payload: overviewPayload
-    });
-    envelopes.push({
-      ...common,
-      kind: "projects",
-      snapshotBytes: snapshotBytes.projects,
-      contentHash: hashJson(projectsPayload),
-      payload: projectsPayload
-    });
+    envelopes.push(buildEnvelope(commonEnvelope, "overview", overviewPayload));
+
+    if (strategy === "chunked-required") {
+      envelopes.push(...buildProjectsChunkEnvelopes(commonEnvelope, projectsPayload));
+    } else {
+      envelopes.push(buildEnvelope(commonEnvelope, "projects", projectsPayload));
+    }
 
     if (strategy === "overview+projects+project-trend" || strategy === "chunked-required") {
-      envelopes.push({
-        ...common,
-        kind: "project-trend",
-        snapshotBytes: snapshotBytes["project-trend"],
-        contentHash: hashJson(projectTrendPayload),
-        payload: projectTrendPayload
-      });
+      if (strategy === "chunked-required") {
+        envelopes.push(...buildProjectTrendChunkEnvelopes(commonEnvelope, projectTrendPayload));
+      } else {
+        envelopes.push(buildEnvelope(commonEnvelope, "project-trend", projectTrendPayload));
+      }
     }
   }
 
@@ -1351,7 +1511,7 @@ function buildSnapshotEnvelopes(
 }
 
 async function persistSnapshotRowsToDb(
-  envelopes: SnapshotEnvelope<keyof SnapshotPayloadByKind>[],
+  envelopes: SnapshotEnvelope[],
   options: { lastError?: string | null } = {}
 ) {
   await ensureSnapshotSchema();
@@ -1409,7 +1569,11 @@ async function persistSnapshotRowsToDb(
     await sql`
       delete from app_pricing_snapshots
       where company = ${company}
-        and kind in ('single', 'overview', 'projects', 'project-trend')
+        and (
+          kind in ('single', 'overview', 'projects', 'project-trend')
+          or kind like 'projects:%'
+          or kind like 'project-trend:entries:%'
+        )
         and not (kind = any(${kinds}))
     `;
   }
@@ -1424,7 +1588,7 @@ async function persistSnapshotRowsToDb(
   }
 }
 
-async function persistBuiltSnapshotsToLocalFile(envelopesByCompany: Record<string, SnapshotEnvelope<keyof SnapshotPayloadByKind>[]>) {
+async function persistBuiltSnapshotsToLocalFile(envelopesByCompany: Record<string, SnapshotEnvelope[]>) {
   await persistLocalSnapshots(envelopesByCompany);
 }
 
@@ -1511,7 +1675,7 @@ async function refreshAndPersistSnapshots() {
     compactMetricsBuildMs: compactMetrics.durationMs
   };
 
-  const envelopesByCompany: Record<string, SnapshotEnvelope<keyof SnapshotPayloadByKind>[]> = {
+  const envelopesByCompany: Record<string, SnapshotEnvelope[]> = {
     CPAC: buildSnapshotEnvelopes(
       "CPAC",
       scopeMetricsToCompany(compactMetrics.records, "CPAC"),
@@ -1632,11 +1796,13 @@ export async function validateDataOceanToken(token: string) {
 function toReadableError(error: unknown) {
   if (error instanceof Error) {
     const message = error.message;
+    const errorWithCause = error as Error & { cause?: unknown };
+    const causeValue = errorWithCause.cause;
     const cause =
-      typeof error.cause === "object" && error.cause !== null
-        ? String((error.cause as { code?: string; message?: string }).code ?? "") +
+      typeof causeValue === "object" && causeValue !== null
+        ? String((causeValue as { code?: string; message?: string }).code ?? "") +
           " " +
-          String((error.cause as { code?: string; message?: string }).message ?? "")
+          String((causeValue as { code?: string; message?: string }).message ?? "")
         : "";
     const combined = `${message} ${cause}`;
 
@@ -1783,7 +1949,8 @@ export async function getDashboard(filters: FilterParams = {}) {
     baselineEnd: filters.baselineEnd
   });
   const { snapshot, availableFilters, freshness } = await getFilteredSnapshotArtifacts(filters);
-  const latestDay = snapshot.trend.at(-1)?.day;
+  const latestTrendPoint = snapshot.trend.length > 0 ? snapshot.trend[snapshot.trend.length - 1] : undefined;
+  const latestDay = latestTrendPoint?.day;
   const summary = filters.day
     ? snapshot.summaryByDay.get(filters.day)
     : latestDay
@@ -1857,7 +2024,8 @@ export async function getSummary(filters: FilterParams = {}) {
     return response;
   }
 
-  const latestDay = snapshot.trend.at(-1)?.day;
+  const latestTrendPoint = snapshot.trend.length > 0 ? snapshot.trend[snapshot.trend.length - 1] : undefined;
+  const latestDay = latestTrendPoint?.day;
   const response = latestDay ? (snapshot.summaryByDay.get(latestDay) ?? snapshot.summary) : snapshot.summary;
   logTiming("getSummary", startedAt, {
     company: normalizeCompany(filters.company),
@@ -2019,7 +2187,8 @@ export async function getPriceTrackingBootstrap(params: {
     baselineStart,
     baselineEnd
   });
-  const latestDay = snapshot.trend.at(-1)?.day;
+  const latestTrendPoint = snapshot.trend.length > 0 ? snapshot.trend[snapshot.trend.length - 1] : undefined;
+  const latestDay = latestTrendPoint?.day;
   const summary = day ? snapshot.summaryByDay.get(day) : latestDay ? snapshot.summaryByDay.get(latestDay) : null;
   const normalizedSearch = search.trim().toLowerCase();
   const ladderSet = new Set(normalizeLadderValues(ladder));

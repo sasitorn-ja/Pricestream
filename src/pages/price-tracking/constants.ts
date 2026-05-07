@@ -52,8 +52,8 @@ export const discountDropSeries = [
 
 export const PAGE_SIZE = 20;
 export const MULTI_LADDER_FETCH_SIZE = 100_000;
-export const FILTER_DEBOUNCE_MS = 180;
-export const SEARCH_DEBOUNCE_MS = 250;
+export const FILTER_DEBOUNCE_MS = 450;
+export const SEARCH_DEBOUNCE_MS = 450;
 
 export const tableColumnHelp = {
   division: "พื้นที่ขายหรือหน่วยงานที่โครงการนี้อยู่ ใช้สำหรับกรองและดูภาพรวมแยกตามพื้นที่",

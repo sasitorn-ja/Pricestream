@@ -98,6 +98,7 @@ function AuthenticatedAppContent({
         </PriceTrackingShell>
       ) : (
         <PriceTrackingPage
+          key={dashboardDivision}
           authUser={authUser}
           activeMenu={resolvedActiveMenu}
           allowedMenus={allowedMenus}

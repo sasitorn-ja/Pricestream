@@ -81,7 +81,7 @@ export function MultiSelectDropdown({
         });
       }}
     >
-      <summary className="flex h-10 min-w-0 list-none cursor-pointer items-center justify-between gap-1.5 rounded-[16px] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-1.5 text-left text-[12px] text-[var(--foreground)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-[var(--border-strong)] [&::-webkit-details-marker]:hidden">
+      <summary className="flex h-9 min-w-0 list-none cursor-pointer items-center justify-between gap-1.5 rounded-[16px] border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-left text-[11px] text-[var(--foreground)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-[var(--border-strong)] xl:h-10 xl:px-3.5 xl:text-[12px] [&::-webkit-details-marker]:hidden">
         <span className="shrink-0 truncate text-[var(--muted-foreground)]">{label}</span>
         <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
           <strong className="min-w-0 truncate font-semibold text-[var(--foreground)]">

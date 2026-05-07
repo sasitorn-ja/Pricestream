@@ -4,7 +4,7 @@ import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
 import { type AuthUser } from "../../services/auth/authUser";
 
-const COMPACT_FILTER_BREAKPOINT = 1180;
+const COMPACT_FILTER_BREAKPOINT = 1080;
 
 function getRoleLabel(role: string) {
   return role === "admin" ? "ผู้ดูแลระบบ" : "ผู้ใช้งาน";

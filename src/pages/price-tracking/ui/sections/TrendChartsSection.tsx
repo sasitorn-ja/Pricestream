@@ -333,6 +333,9 @@ export function TrendChartsSection({
   const divisionPriceYAxisDomain = DIVISION_PRICE_Y_AXIS_DOMAIN;
   const divisionPriceYAxisTicks = DIVISION_PRICE_Y_AXIS_TICKS;
   const shouldShowEveryDivisionPriceTick = isDailyGranularity || divisionPriceChartData.length <= 14;
+  const shouldRenderAveragePointLabels = filteredAverageTrend.length <= 18;
+  const shouldRenderDivisionPricePointLabels =
+    divisionPriceChartData.length <= 14 && divisionPriceSeries.length <= 3;
   const divisionPriceTrendTable = buildDivisionPriceTrendTable({
     trend: divisionPriceTrendData,
     divisions: divisionPriceSeries,
@@ -598,7 +601,7 @@ export function TrendChartsSection({
                     stroke="#fb7185"
                     strokeWidth={3}
                     dot
-                    label={renderAveragePointLabel}
+                    label={shouldRenderAveragePointLabels ? renderAveragePointLabel : undefined}
                     name="Average increase"
                   />
                 </LineChart>
@@ -695,7 +698,11 @@ export function TrendChartsSection({
                             strokeWidth={3}
                             dot
                             connectNulls
-                            label={renderDivisionPricePointLabel(index, color)}
+                            label={
+                              shouldRenderDivisionPricePointLabels
+                                ? renderDivisionPricePointLabel(index, color)
+                                : undefined
+                            }
                             name={divisionName}
                           />
                         );

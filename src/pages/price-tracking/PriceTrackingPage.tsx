@@ -444,12 +444,12 @@ export function PriceTrackingPage({
     setTrend([]);
     setDivisionPriceTrend([]);
     setHasLoadedProjects(false);
-    setBaseDashboardDivisions([]);
+    setBaseDashboardDivisions(cachedDefaultDivisions);
     setBaseDashboardFcNamesByDivision({});
     setBaseDashboardSegments([]);
     setBaseDashboardChannels([]);
     setBaseDashboardDiscountTypes([]);
-    setSelectedDivisions([]);
+    setSelectedDivisions(cachedDefaultDivisions);
     setSelectedSegments([]);
     setSelectedChannels([]);
     setSelectedFcNames([]);
