@@ -1092,9 +1092,20 @@ export function PriceTrackingPage({
       onClearDiscountTypes={() => setSelectedDiscountTypes([])}
     />
   );
+  const hasDashboardAlert = !hasDashboardData || !hasTrendData || Boolean(dashboardError);
+  const dashboardAlertLabel = !hasDashboardData
+    ? dashboardRefreshError
+      ? `refresh ข้อมูลไม่สำเร็จ: ${dashboardRefreshError}`
+      : "ยังไม่มี snapshot ข้อมูลในระบบ"
+    : !hasTrendData
+      ? "ยังไม่มีข้อมูลที่ตรงกับตัวกรอง"
+      : dashboardError
+        ? `โหลด dashboard ไม่สำเร็จ: ${dashboardError}`
+        : "";
   const pendingNotificationCount =
     adminNotificationSummary.pendingRequestCount +
-    (adminNotificationSummary.dataOceanTokenAlert ? 1 : 0);
+    (adminNotificationSummary.dataOceanTokenAlert ? 1 : 0) +
+    (hasDashboardAlert ? 1 : 0);
   const dataOceanAlertLabel =
     adminNotificationSummary.dataOceanDaysRemaining !== null &&
     adminNotificationSummary.dataOceanDaysRemaining <= 0
@@ -1107,6 +1118,7 @@ export function PriceTrackingPage({
   const notificationLabel =
     pendingNotificationCount > 0
       ? [
+          hasDashboardAlert ? dashboardAlertLabel : null,
           adminNotificationSummary.pendingRequestCount > 0
             ? `มีคำขอสิทธิ์รออนุมัติ ${adminNotificationSummary.pendingRequestCount} รายการ`
             : null,
@@ -1116,6 +1128,14 @@ export function PriceTrackingPage({
           .join(" • ")
       : "ยังไม่มีคำขอสิทธิ์ใหม่";
   const openAdminNotifications = () => {
+    if (hasDashboardAlert) {
+      document.getElementById("dashboard-alert")?.scrollIntoView({
+        behavior: "smooth",
+        block: "center"
+      });
+      return;
+    }
+
     const target = adminNotificationSummary.dataOceanTokenAlert ? "data-ocean" : "users";
     window.sessionStorage.setItem("admin-active-view", target);
     window.dispatchEvent(new CustomEvent("admin-view-change", { detail: target }));
@@ -1152,6 +1172,7 @@ export function PriceTrackingPage({
             themeMode={themeMode}
             pendingNotificationCount={pendingNotificationCount}
             notificationLabel={notificationLabel}
+            hasDashboardAlert={hasDashboardAlert}
             onToggleTheme={onToggleTheme}
             onOpenNotifications={openAdminNotifications}
             onOpenCalcHelp={setActiveCalcHelp}
@@ -1160,7 +1181,7 @@ export function PriceTrackingPage({
 
         {!hasDashboardData || !hasTrendData ? (
           <div className={appShellClass}>
-            <div className="rounded-[22px] border border-[var(--border-strong)] bg-[var(--surface)] px-5 py-4 text-sm leading-6 text-[var(--muted-foreground)] shadow-[0_18px_40px_var(--shadow-color)]">
+            <div id="dashboard-alert" className="scroll-mt-28 rounded-[22px] border border-[var(--border-strong)] bg-[var(--surface)] px-5 py-4 text-sm leading-6 text-[var(--muted-foreground)] shadow-[0_18px_40px_var(--shadow-color)]">
               <strong className="block text-[var(--foreground)]">
                 {!hasDashboardData ? "ยังไม่มี snapshot ข้อมูลในระบบ" : "ยังไม่มีข้อมูลที่ตรงกับตัวกรอง"}
               </strong>

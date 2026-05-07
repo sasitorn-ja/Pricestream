@@ -1,4 +1,4 @@
-import { Bell, MoonStar, SunMedium } from "lucide-react";
+import { Bell, BellDot, MoonStar, SunMedium } from "lucide-react";
 import { Button } from "../../../../components/ui/button";
 import { appShellClass, summaryCardClass } from "../../../../components/ui/styles";
 import { cn } from "../../../../lib/utils";
@@ -16,6 +16,7 @@ type OverviewSectionProps = {
   themeMode: "dark" | "light";
   pendingNotificationCount: number;
   notificationLabel: string;
+  hasDashboardAlert: boolean;
   onToggleTheme: () => void;
   onOpenNotifications: () => void;
   onOpenCalcHelp: (key: "baselineDefinition" | "totalIncrease" | "averageToTarget") => void;
@@ -34,6 +35,7 @@ export function OverviewSection({
   themeMode,
   pendingNotificationCount,
   notificationLabel,
+  hasDashboardAlert,
   onToggleTheme,
   onOpenNotifications,
   onOpenCalcHelp
@@ -62,7 +64,7 @@ export function OverviewSection({
               aria-label={notificationLabel}
               title={notificationLabel}
             >
-              <Bell className="size-4.5" />
+              {hasDashboardAlert ? <BellDot className="size-4.5" /> : <Bell className="size-4.5" />}
               {pendingNotificationCount > 0 ? (
                 <span className="absolute -top-1 -right-1 inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--primary)] px-1.5 text-[10px] font-bold text-[var(--primary-foreground)]">
                   {pendingNotificationCount > 9 ? "9+" : pendingNotificationCount}

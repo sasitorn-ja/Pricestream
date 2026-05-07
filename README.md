@@ -55,6 +55,10 @@ MAIL_FROM="CPAC Dashboard <devcpacadmin@gmail.com>"
 ```bash
 DATAOCEAN_API_URL=https://dataocean.scg.com/api/broker/json/723ebc9c-71f9-4468-9dc7-75685b54005a?from=web-api
 DATAOCEAN_API_TOKEN=YOUR_TOKEN
+DATAOCEAN_TIMEOUT_MS=25000
+DATABASE_URL=YOUR_NEON_CONNECTION_STRING
+CACHE_REFRESH_TOKEN=YOUR_REFRESH_TOKEN
+CRON_SECRET=YOUR_REFRESH_TOKEN
 ```
 
 พฤติกรรมของระบบ:
@@ -64,3 +68,6 @@ DATAOCEAN_API_TOKEN=YOUR_TOKEN
 
 หมายเหตุสำหรับ Vercel:
 - API จะถูกรันผ่าน Vercel Serverless Functions ที่ path `/api/*`
+- Cron refresh ใน `vercel.json` ใช้เวลา UTC โดย `5 0 * * *` คือ 07:05 เวลาไทย และ `20 0 * * *` คือ 07:20 เวลาไทยสำหรับ retry หลังข้อมูล DataOcean รอบเช้าเริ่มมา
+- ถ้าหน้า dashboard ขึ้นว่า `ยังไม่มี snapshot ข้อมูลในระบบ` หรือ `refresh ข้อมูลไม่สำเร็จ` ให้เช็ก `/api/cache/status` และลอง POST `/api/cache/refresh` ด้วย admin/session หรือ bearer token ก่อน ข้อมูลจะขึ้นหลัง refresh สร้าง snapshot ลง Neon สำเร็จ
+- หากเจอ timeout จาก DataOcean ให้เพิ่ม `DATAOCEAN_TIMEOUT_MS` ใน Vercel โดยต้องเหลือเวลาให้ function สร้างและบันทึก snapshot ภายใน `maxDuration` ของ Vercel ด้วย

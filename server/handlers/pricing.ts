@@ -222,7 +222,7 @@ function readNumberEnv(name: string) {
   return Number(rawValue);
 }
 
-const DEFAULT_REMOTE_FETCH_TIMEOUT_MS = 8_000;
+const DEFAULT_REMOTE_FETCH_TIMEOUT_MS = 25_000;
 const parsedRemoteFetchTimeoutMs = readNumberEnv("DATAOCEAN_TIMEOUT_MS");
 const REMOTE_FETCH_TIMEOUT_MS =
   Number.isFinite(parsedRemoteFetchTimeoutMs) && parsedRemoteFetchTimeoutMs > 0
@@ -1843,7 +1843,11 @@ function toReadableError(error: unknown) {
       return "DataOcean token was rejected. Check the configured token in Admin or environment.";
     }
 
-    if (combined.includes("timed out") || combined.includes("TimeoutError")) {
+    if (
+      combined.includes("timed out") ||
+      combined.includes("timeout") ||
+      combined.includes("TimeoutError")
+    ) {
       return `DataOcean did not respond within ${REMOTE_FETCH_TIMEOUT_MS / 1000} seconds.`;
     }
 
