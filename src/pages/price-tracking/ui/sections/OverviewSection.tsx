@@ -12,6 +12,7 @@ type OverviewSectionProps = {
   targetHitShareLabel: string;
   summaryDateRange: string;
   dashboardLoading: boolean;
+  coldDataLoading: boolean;
   showDashboardSlowNotice: boolean;
   themeMode: "dark" | "light";
   pendingNotificationCount: number;
@@ -31,6 +32,7 @@ export function OverviewSection({
   targetHitShareLabel,
   summaryDateRange,
   dashboardLoading,
+  coldDataLoading,
   showDashboardSlowNotice,
   themeMode,
   pendingNotificationCount,
@@ -101,11 +103,13 @@ export function OverviewSection({
                 Avg increase
               </span>
               <strong className="mt-1 block text-[1.7rem] font-black leading-tight text-[var(--foreground)]">
-                {avgIncreaseLabel} บาท B/CU
+                {coldDataLoading ? "กำลังโหลด..." : `${avgIncreaseLabel} บาท B/CU`}
               </strong>
             </div>
           </div>
-          <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">คำนวณจากข้อมูล {summaryDateRange}</p>
+          <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">
+            {coldDataLoading ? "กำลังเตรียมข้อมูลล่าสุดจาก DataOcean" : `คำนวณจากข้อมูล ${summaryDateRange}`}
+          </p>
         </article>
         <article className={summaryCardClass}>
           <div className="relative">
@@ -122,12 +126,14 @@ export function OverviewSection({
                 Average to target
               </span>
               <strong className="mt-1 block text-[1.7rem] font-black leading-tight text-[var(--foreground)]">
-                {targetHitShareLabel}
+                {coldDataLoading ? "กำลังโหลด..." : targetHitShareLabel}
               </strong>
             </div>
           </div>
           <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">
-            สัดส่วนโครงการที่ขึ้นถึง 300 บาท B/CU ขึ้นไป {summaryDateRange}
+            {coldDataLoading
+              ? "ระบบกำลังสร้างชุดข้อมูลสำหรับ dashboard"
+              : `สัดส่วนโครงการที่ขึ้นถึง 300 บาท B/CU ขึ้นไป ${summaryDateRange}`}
           </p>
         </article>
       </section>
@@ -135,8 +141,8 @@ export function OverviewSection({
       {dashboardLoading ? (
         <div className="rounded-[18px] border border-[var(--border-strong)] bg-[var(--primary-soft)] px-4 py-3 text-sm text-[var(--muted-foreground)]">
           {showDashboardSlowNotice
-            ? "ข้อมูลกำลังคำนวณนานกว่าปกติ แสดงข้อมูลเดิมไว้ก่อนจนกว่าจะโหลดเสร็จ"
-            : "กำลังอัปเดตข้อมูลตาม filter..."}
+            ? "กำลังโหลดข้อมูลล่าสุด อาจใช้เวลาประมาณ 20-30 วินาทีในรอบแรก"
+            : "กำลังโหลดข้อมูล..."}
         </div>
       ) : null}
     </div>

@@ -77,6 +77,8 @@ const sharedDashboardCache = new Map<string, DashboardResponse>();
 const sharedProjectsCache = new Map<string, ProjectResponse>();
 const sharedSelectedTrendCache = new Map<string, ProjectTrendResponse>();
 const BOOTSTRAP_REVALIDATE_DELAY_MS = 1_200;
+const BOOTSTRAP_COLD_REVALIDATE_DELAY_MS = 2_500;
+const BOOTSTRAP_MAX_REVALIDATE_ATTEMPTS = 24;
 
 function getDashboardDivisions(availableDivisions: string[], dashboardDivision: CompanyCode) {
   const aliases = new Set(dashboardDivisionAliases[dashboardDivision].map((value) => value.toUpperCase()));
@@ -670,7 +672,7 @@ export function PriceTrackingPage({
     projectRequestIdRef.current = requestId;
     const controller = new AbortController();
 
-    async function loadBootstrapData(allowFollowup = true) {
+    async function loadBootstrapData(remainingFollowups = BOOTSTRAP_MAX_REVALIDATE_ATTEMPTS) {
       try {
         const startedAt = performance.now();
         const cachedResponse = bootstrapQueryCache.get(bootstrapQueryKey);
@@ -754,15 +756,19 @@ export function PriceTrackingPage({
         });
 
         if (
-          allowFollowup &&
+          remainingFollowups > 0 &&
           !controller.signal.aborted &&
           (bootstrapResponse.isStale || bootstrapResponse.isRefreshing)
         ) {
+          const delay =
+            bootstrapResponse.hasData === false
+              ? BOOTSTRAP_COLD_REVALIDATE_DELAY_MS
+              : BOOTSTRAP_REVALIDATE_DELAY_MS;
           window.setTimeout(() => {
             if (!controller.signal.aborted) {
-              void loadBootstrapData(false);
+              void loadBootstrapData(remainingFollowups - 1);
             }
-          }, BOOTSTRAP_REVALIDATE_DELAY_MS);
+          }, delay);
         }
       } catch (requestError) {
         if (
@@ -1060,6 +1066,7 @@ export function PriceTrackingPage({
       ? (targetHitSites / summary.comparableSites) * 100
       : 0;
   const summaryDateRange = formatSummaryDateRange(summary, latestTrendDay);
+  const coldDataLoading = !hasDashboardData && dashboardBackendRefreshing;
   const calcHelpContent = buildCalcHelpContent({
     summary,
     summaryDateRange,
@@ -1102,7 +1109,7 @@ export function PriceTrackingPage({
     ? dashboardRefreshError
       ? `refresh ข้อมูลไม่สำเร็จ: ${dashboardRefreshError}`
       : dashboardBackendRefreshing
-        ? "กำลังสร้าง snapshot ข้อมูล กรุณารอสักครู่แล้ว refresh หน้าอีกครั้ง"
+        ? "กำลังโหลดข้อมูลล่าสุด"
         : "ยังไม่มี snapshot ข้อมูลในระบบ"
     : !hasTrendData
       ? "ยังไม่มีข้อมูลที่ตรงกับตัวกรอง"
@@ -1174,7 +1181,8 @@ export function PriceTrackingPage({
             avgIncreaseLabel={formatNumber(summary.avgIncrease)}
             targetHitShareLabel={`${formatNumber(targetHitShare)}%`}
             summaryDateRange={summaryDateRange}
-            dashboardLoading={isRefreshingDashboard && !summary}
+            dashboardLoading={isBootstrapping || isRefreshingDashboard || coldDataLoading}
+            coldDataLoading={coldDataLoading}
             showDashboardSlowNotice={showDashboardSlowNotice}
             themeMode={themeMode}
             pendingNotificationCount={pendingNotificationCount}
@@ -1192,16 +1200,16 @@ export function PriceTrackingPage({
               <strong className="block text-[var(--foreground)]">
                 {!hasDashboardData
                   ? dashboardBackendRefreshing
-                    ? "กำลังสร้าง snapshot ข้อมูล"
-                    : "ยังไม่มี snapshot ข้อมูลในระบบ"
+                    ? "กำลังโหลดข้อมูล"
+                    : "ยังไม่มีข้อมูลพร้อมแสดง"
                   : "ยังไม่มีข้อมูลที่ตรงกับตัวกรอง"}
               </strong>
               {!hasDashboardData
                 ? dashboardRefreshError
                   ? `refresh ข้อมูลไม่สำเร็จ: ${dashboardRefreshError}`
                   : dashboardBackendRefreshing
-                    ? "backend กำลังดึงข้อมูลจาก DataOcean และบันทึก snapshot ลง Neon กรุณารอสักครู่แล้ว refresh หน้าอีกครั้ง"
-                    : "API ตอบกลับสำเร็จแล้ว แต่ backend ยังไม่มี cache/snapshot สำหรับ dashboard ชุดนี้ จึงแสดงค่าเป็นศูนย์ไว้ก่อน"
+                    ? "ระบบกำลังดึงข้อมูลล่าสุดจาก DataOcean ใช้เวลาประมาณ 20-30 วินาทีในรอบแรก หน้านี้จะอัปเดตให้อัตโนมัติ"
+                    : "ระบบยังไม่มีข้อมูล cache สำหรับ dashboard ชุดนี้ กรุณาลองใหม่อีกครั้งในอีกสักครู่"
                 : "ลองปรับช่วง Baseline หรือรีเซ็ตตัวกรอง Division / FC, Segment, Channel และ Discount type"}
             </div>
           </div>
