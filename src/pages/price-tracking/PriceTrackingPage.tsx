@@ -79,6 +79,38 @@ const sharedSelectedTrendCache = new Map<string, ProjectTrendResponse>();
 const BOOTSTRAP_REVALIDATE_DELAY_MS = 1_200;
 const BOOTSTRAP_COLD_REVALIDATE_DELAY_MS = 2_500;
 const BOOTSTRAP_MAX_REVALIDATE_ATTEMPTS = 24;
+const BASELINE_STORAGE_KEY_PREFIX = "pricing-monitor-baseline";
+
+function readStoredBaseline(dashboardDivision: CompanyCode) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(`${BASELINE_STORAGE_KEY_PREFIX}:${dashboardDivision}`);
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsedValue = JSON.parse(rawValue) as { start?: unknown; end?: unknown };
+    const start = typeof parsedValue.start === "string" ? parsedValue.start : "";
+    const end = typeof parsedValue.end === "string" ? parsedValue.end : "";
+    return start && end && start <= end ? { start, end } : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeBaseline(dashboardDivision: CompanyCode, start: string, end: string) {
+  if (typeof window === "undefined" || !start || !end || start > end) {
+    return;
+  }
+
+  window.localStorage.setItem(
+    `${BASELINE_STORAGE_KEY_PREFIX}:${dashboardDivision}`,
+    JSON.stringify({ start, end })
+  );
+}
 
 function getDashboardDivisions(availableDivisions: string[], dashboardDivision: CompanyCode) {
   const aliases = new Set(dashboardDivisionAliases[dashboardDivision].map((value) => value.toUpperCase()));
@@ -153,6 +185,7 @@ export function PriceTrackingPage({
 }: PriceTrackingPageProps) {
   const cachedBootstrap = bootstrapCacheByDivision.get(dashboardDivision) ?? null;
   const cachedDefaultDivisions = dashboardDivisionAliases[dashboardDivision];
+  const storedBaseline = readStoredBaseline(dashboardDivision);
   const hasCachedBootstrap = Boolean(cachedBootstrap);
   const [meta, setMeta] = useState<MetaResponse | null>(cachedBootstrap?.meta ?? null);
   const [summary, setSummary] = useState<SummaryResponse | null>(cachedBootstrap?.summary ?? null);
@@ -195,8 +228,12 @@ export function PriceTrackingPage({
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
   const [selectedFcNames, setSelectedFcNames] = useState<string[]>([]);
   const [selectedDiscountTypes, setSelectedDiscountTypes] = useState<string[]>([]);
-  const [baselineStart, setBaselineStart] = useState(cachedBootstrap?.meta.config.baselineStart ?? "");
-  const [baselineEnd, setBaselineEnd] = useState(cachedBootstrap?.meta.config.baselineEnd ?? "");
+  const [baselineStart, setBaselineStart] = useState(
+    storedBaseline?.start ?? cachedBootstrap?.meta.config.baselineStart ?? ""
+  );
+  const [baselineEnd, setBaselineEnd] = useState(
+    storedBaseline?.end ?? cachedBootstrap?.meta.config.baselineEnd ?? ""
+  );
   const [selectedSite, setSelectedSite] = useState(cachedBootstrap?.selectedSite ?? "");
   const [selectedTrend, setSelectedTrend] = useState<ProjectTrendPoint[]>(
     cachedBootstrap?.selectedProjectTrend ?? []
@@ -287,6 +324,15 @@ export function PriceTrackingPage({
   };
   const buildBootstrapQueryParams = (selectedSiteValue?: string) => {
     const params = buildCompanyScopedQuery(buildFilterQuery(debouncedQueryFilterState));
+    params.set("page", "1");
+    params.set("pageSize", String(PAGE_SIZE));
+    if (selectedSiteValue) {
+      params.set("selectedSite", selectedSiteValue);
+    }
+    return params;
+  };
+  const buildProjectsQueryParams = () => {
+    const params = buildCompanyScopedQuery(buildFilterQuery(debouncedQueryFilterState));
     if (debouncedSelectedDay) {
       params.set("day", debouncedSelectedDay);
     }
@@ -298,9 +344,6 @@ export function PriceTrackingPage({
     }
     params.set("page", String(currentPage));
     params.set("pageSize", String(PAGE_SIZE));
-    if (selectedSiteValue) {
-      params.set("selectedSite", selectedSiteValue);
-    }
     return params;
   };
   const buildBootstrapCacheKey = (params: URLSearchParams) => buildCanonicalQueryKey(params);
@@ -608,6 +651,17 @@ export function PriceTrackingPage({
     () => buildBootstrapQueryParams(selectedSiteRef.current),
     [
       debouncedQueryFilterState,
+      dashboardDivision
+    ]
+  );
+  const bootstrapQueryKey = useMemo(
+    () => buildBootstrapCacheKey(bootstrapQueryParams),
+    [bootstrapQueryParams]
+  );
+  const projectsQueryParams = useMemo(
+    () => buildProjectsQueryParams(),
+    [
+      debouncedQueryFilterState,
       debouncedSelectedDay,
       debouncedSearch,
       debouncedSelectedBuckets,
@@ -615,9 +669,9 @@ export function PriceTrackingPage({
       dashboardDivision
     ]
   );
-  const bootstrapQueryKey = useMemo(
-    () => buildBootstrapCacheKey(bootstrapQueryParams),
-    [bootstrapQueryParams]
+  const projectsQueryKey = useMemo(
+    () => buildCanonicalQueryKey(projectsQueryParams),
+    [projectsQueryParams]
   );
   const selectedTrendQueryParams = useMemo(
     () => buildCompanyScopedQuery(buildFilterQuery(debouncedQueryFilterState)),
@@ -669,7 +723,6 @@ export function PriceTrackingPage({
     }
 
     const requestId = ++dashboardRequestIdRef.current;
-    projectRequestIdRef.current = requestId;
     const controller = new AbortController();
 
     async function loadBootstrapData(remainingFollowups = BOOTSTRAP_MAX_REVALIDATE_ATTEMPTS) {
@@ -678,7 +731,6 @@ export function PriceTrackingPage({
         const cachedResponse = bootstrapQueryCache.get(bootstrapQueryKey);
         if (cachedResponse) {
           applyDashboardResponse(cachedResponse);
-          applyProjectsResponse(cachedResponse.projects, cachedResponse.selectedSite);
           if (
             cachedResponse.selectedSite &&
             cachedResponse.selectedSite === (selectedSiteRef.current || cachedResponse.selectedSite)
@@ -687,17 +739,12 @@ export function PriceTrackingPage({
             setSelectedTrend(cachedResponse.selectedProjectTrend);
           }
         } else if (!summary) {
-          setProjectRows([]);
-          setProjectTotal(0);
-          setHasLoadedProjects(false);
           setSelectedSite("");
           setSelectedTrend([]);
           selectedSiteRef.current = "";
         }
         setIsRefreshingDashboard(true);
-        setIsRefreshingProjects(true);
         setDashboardError("");
-        setProjectError("");
         const bootstrapResponse = await fetchJson<PriceTrackingBootstrapResponse>(
           `/api/price-tracking/bootstrap?${bootstrapQueryParams.toString()}`,
           { signal: controller.signal }
@@ -722,17 +769,7 @@ export function PriceTrackingPage({
             hasData: bootstrapResponse.hasData
           }
         );
-        projectsCacheRef.current.set(bootstrapQueryKey, {
-          rows: bootstrapResponse.projects.rows,
-          total: bootstrapResponse.projects.total,
-          generatedAt: bootstrapResponse.generatedAt,
-          snapshotFetchedAt: bootstrapResponse.snapshotFetchedAt,
-          isStale: bootstrapResponse.isStale,
-          isRefreshing: bootstrapResponse.isRefreshing,
-          hasData: bootstrapResponse.hasData
-        });
         applyDashboardResponse(bootstrapResponse);
-        applyProjectsResponse(bootstrapResponse.projects, selectedSiteRef.current);
         if (
           bootstrapResponse.selectedSite &&
           bootstrapResponse.selectedSite === (selectedSiteRef.current || bootstrapResponse.selectedSite)
@@ -751,8 +788,7 @@ export function PriceTrackingPage({
         }
         logClientTiming("bootstrap_refresh", startedAt, {
           company: dashboardDivision,
-          hasCachedData: Boolean(cachedResponse),
-          page: currentPage
+          hasCachedData: Boolean(cachedResponse)
         });
 
         if (
@@ -782,11 +818,9 @@ export function PriceTrackingPage({
         }
 
         setDashboardError(requestError instanceof Error ? requestError.message : "Unknown error");
-        setProjectError(requestError instanceof Error ? requestError.message : "Unknown error");
       } finally {
         if (requestId === dashboardRequestIdRef.current && !controller.signal.aborted) {
           setIsRefreshingDashboard(false);
-          setIsRefreshingProjects(false);
         }
       }
     }
@@ -800,9 +834,75 @@ export function PriceTrackingPage({
     bootstrapQueryKey,
     bootstrapQueryParams,
     dashboardDivision,
-    currentPage,
     debouncedQueryFilterState,
     selectedTrendQueryParams
+  ]);
+
+  useEffect(() => {
+    if (isBootstrapping || pendingPageResetRef.current) {
+      return;
+    }
+
+    const requestId = ++projectRequestIdRef.current;
+    const controller = new AbortController();
+
+    async function loadProjects() {
+      try {
+        const startedAt = performance.now();
+        const cachedResponse = projectsCacheRef.current.get(projectsQueryKey);
+        if (cachedResponse) {
+          applyProjectsResponse(cachedResponse, selectedSiteRef.current);
+        } else if (!hasLoadedProjects) {
+          setProjectRows([]);
+          setProjectTotal(0);
+        }
+
+        setIsRefreshingProjects(true);
+        setProjectError("");
+
+        const projectsResponse = await fetchJson<ProjectResponse>(
+          `/api/projects?${projectsQueryParams.toString()}`,
+          { signal: controller.signal }
+        );
+
+        if (requestId !== projectRequestIdRef.current || controller.signal.aborted) {
+          return;
+        }
+
+        projectsCacheRef.current.set(projectsQueryKey, projectsResponse);
+        applyProjectsResponse(projectsResponse, selectedSiteRef.current);
+        logClientTiming("projects_refresh", startedAt, {
+          company: dashboardDivision,
+          hasCachedData: Boolean(cachedResponse),
+          page: currentPage
+        });
+      } catch (requestError) {
+        if (
+          requestId !== projectRequestIdRef.current ||
+          controller.signal.aborted ||
+          isAbortError(requestError)
+        ) {
+          return;
+        }
+
+        setProjectError(requestError instanceof Error ? requestError.message : "Unknown error");
+      } finally {
+        if (requestId === projectRequestIdRef.current && !controller.signal.aborted) {
+          setIsRefreshingProjects(false);
+        }
+      }
+    }
+
+    void loadProjects();
+
+    return () => controller.abort();
+  }, [
+    isBootstrapping,
+    pendingPageResetRef,
+    projectsQueryKey,
+    projectsQueryParams,
+    dashboardDivision,
+    currentPage
   ]);
 
   useEffect(() => {
@@ -1090,8 +1190,11 @@ export function PriceTrackingPage({
       selectedFcNames={selectedFcNames}
       selectedDiscountTypes={selectedDiscountTypes}
       onOpenBaselineHelp={() => setActiveCalcHelp("baselineDefinition")}
-      onBaselineStartChange={setBaselineStart}
-      onBaselineEndChange={setBaselineEnd}
+      onApplyBaseline={(start, end) => {
+        setBaselineStart(start);
+        setBaselineEnd(end);
+        storeBaseline(dashboardDivision, start, end);
+      }}
       onResetSharedFilters={clearSharedFilters}
       onSelectDivision={selectOnlyDivision}
       onToggleDivision={toggleDivision}
@@ -1183,7 +1286,7 @@ export function PriceTrackingPage({
             avgIncreaseLabel={formatNumber(summary.avgIncrease)}
             targetHitShareLabel={`${formatNumber(targetHitShare)}%`}
             summaryDateRange={summaryDateRange}
-            dashboardLoading={isBootstrapping || isRefreshingDashboard || coldDataLoading}
+            dashboardLoading={coldDataLoading}
             coldDataLoading={coldDataLoading}
             showDashboardSlowNotice={showDashboardSlowNotice}
             themeMode={themeMode}

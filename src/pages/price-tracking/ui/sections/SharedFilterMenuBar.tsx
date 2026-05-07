@@ -1,5 +1,5 @@
 import { CalendarDays, ChevronDown } from "lucide-react";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../../../../components/ui/button";
 import { Input } from "../../../../components/ui/input";
 import { cn } from "../../../../lib/utils";
@@ -22,8 +22,7 @@ type SharedFilterMenuBarProps = {
   selectedFcNames: string[];
   selectedDiscountTypes: string[];
   onOpenBaselineHelp: () => void;
-  onBaselineStartChange: (value: string) => void;
-  onBaselineEndChange: (value: string) => void;
+  onApplyBaseline: (start: string, end: string) => void;
   onResetSharedFilters: () => void;
   onSelectDivision: (value: string) => void;
   onToggleDivision: (value: string) => void;
@@ -53,8 +52,7 @@ export function SharedFilterMenuBar({
   selectedFcNames,
   selectedDiscountTypes,
   onOpenBaselineHelp,
-  onBaselineStartChange,
-  onBaselineEndChange,
+  onApplyBaseline,
   onResetSharedFilters,
   onSelectDivision,
   onToggleDivision,
@@ -70,6 +68,8 @@ export function SharedFilterMenuBar({
 }: SharedFilterMenuBarProps) {
   const baselineStartInputRef = useRef<HTMLInputElement | null>(null);
   const baselineEndInputRef = useRef<HTMLInputElement | null>(null);
+  const [draftBaselineStart, setDraftBaselineStart] = useState(selectedBaselineStart);
+  const [draftBaselineEnd, setDraftBaselineEnd] = useState(selectedBaselineEnd);
   const hasSelectedEveryDivision =
     availableDivisions.length > 0 &&
     selectedDivisions.length === availableDivisions.length &&
@@ -87,6 +87,18 @@ export function SharedFilterMenuBar({
       : shouldTreatDivisionsAsAll
         ? "ทั้งหมด"
         : summarizeMultiSelect(selectedDivisions, "ทั้งหมด");
+  const hasBaselineDraftChanges =
+    draftBaselineStart !== selectedBaselineStart || draftBaselineEnd !== selectedBaselineEnd;
+  const canApplyBaseline =
+    hasBaselineDraftChanges &&
+    Boolean(draftBaselineStart) &&
+    Boolean(draftBaselineEnd) &&
+    draftBaselineStart <= draftBaselineEnd;
+
+  useEffect(() => {
+    setDraftBaselineStart(selectedBaselineStart);
+    setDraftBaselineEnd(selectedBaselineEnd);
+  }, [selectedBaselineStart, selectedBaselineEnd]);
 
   const openDatePicker = (input: HTMLInputElement | null) => {
     if (!input) {
@@ -127,8 +139,8 @@ export function SharedFilterMenuBar({
                 <Input
                   ref={baselineStartInputRef}
                   type="date"
-                  value={selectedBaselineStart}
-                  onChange={(event) => onBaselineStartChange(event.target.value)}
+                  value={draftBaselineStart}
+                  onChange={(event) => setDraftBaselineStart(event.target.value)}
                   className="pricing-date-input h-9 w-[138px] rounded-[14px] pr-8 text-[11px] xl:h-10 xl:w-[148px] xl:pr-10 xl:text-[12px]"
                 />
                 <Button
@@ -150,8 +162,8 @@ export function SharedFilterMenuBar({
                 <Input
                   ref={baselineEndInputRef}
                   type="date"
-                  value={selectedBaselineEnd}
-                  onChange={(event) => onBaselineEndChange(event.target.value)}
+                  value={draftBaselineEnd}
+                  onChange={(event) => setDraftBaselineEnd(event.target.value)}
                   className="pricing-date-input h-9 w-[138px] rounded-[14px] pr-8 text-[11px] xl:h-10 xl:w-[148px] xl:pr-10 xl:text-[12px]"
                 />
                 <Button
@@ -165,6 +177,16 @@ export function SharedFilterMenuBar({
                 </Button>
               </div>
             </label>
+            <Button
+              variant="chip"
+              size="sm"
+              className="h-9 shrink-0 rounded-[14px] px-3 text-[11px] xl:h-10 xl:text-xs"
+              data-active={canApplyBaseline}
+              disabled={!canApplyBaseline}
+              onClick={() => onApplyBaseline(draftBaselineStart, draftBaselineEnd)}
+            >
+              {hasBaselineDraftChanges ? "ใช้ Baseline" : "ใช้แล้ว"}
+            </Button>
           </div>
 
           <details

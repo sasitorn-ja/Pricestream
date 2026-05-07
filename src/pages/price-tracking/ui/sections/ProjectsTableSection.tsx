@@ -1,4 +1,4 @@
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, LoaderCircle, Search, SlidersHorizontal } from "lucide-react";
 import { useRef } from "react";
 import { Button } from "../../../../components/ui/button";
 import { Input } from "../../../../components/ui/input";
@@ -81,6 +81,8 @@ export function ProjectsTableSection({
   const selectedDayInputRef = useRef<HTMLInputElement | null>(null);
   const availableDayMin = availableDays[0] ?? "";
   const availableDayMax = availableDays.at(-1) ?? "";
+  const hasTableFilters =
+    activeTableFilters.length > 0 || selectedBuckets.length > 0 || Boolean(selectedDay) || Boolean(search.trim());
 
   const openDatePicker = (input: HTMLInputElement | null) => {
     if (!input) {
@@ -113,17 +115,49 @@ export function ProjectsTableSection({
           </Button>
         </div>
 
-        <div data-filter-root className="space-y-3 rounded-[24px] border border-[var(--border)] bg-[var(--surface-muted)] p-4">
-          <div className="grid gap-3 2xl:grid-cols-[minmax(360px,0.8fr)_260px_minmax(620px,1.2fr)] 2xl:items-end">
-            <div className="min-w-0">
-              <Input
-                value={search}
-                onChange={(event) => onSearchChange(event.target.value)}
-                placeholder="ค้นหา SITE_NAME, SITE_NO, division, segment"
-              />
+        <div data-filter-root className="rounded-[24px] border border-[var(--border)] bg-[var(--surface-muted)] p-3 md:p-4">
+          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-[14px] bg-[var(--primary-soft)] text-[var(--primary)]">
+                <SlidersHorizontal className="size-4" />
+              </span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-[var(--foreground)]">ตัวกรองรายการโครงการ</div>
+                <div className="truncate text-xs text-[var(--muted-foreground)]">
+                  ค้นหาไซต์ เลือกวัน และจัดกลุ่มตาม ladder
+                </div>
+              </div>
             </div>
+            <div className="flex shrink-0 items-center gap-3">
+              {projectLoading && hasLoadedProjects ? (
+                <span className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs font-semibold text-[var(--muted-foreground)]">
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                  กำลังอัปเดต
+                </span>
+              ) : null}
+              <Button variant="outline" size="sm" onClick={onResetTableFilters} disabled={!hasTableFilters}>
+                ล้างตัวกรอง
+              </Button>
+            </div>
+          </div>
 
-            <div className="min-w-0 space-y-2">
+          <div className="grid gap-3 xl:grid-cols-[minmax(360px,1fr)_280px] xl:items-end">
+            <label className="min-w-0 space-y-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
+                ค้นหา
+              </span>
+              <div className="relative">
+                <Search className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+                <Input
+                  value={search}
+                  onChange={(event) => onSearchChange(event.target.value)}
+                  placeholder="ค้นหา SITE_NAME, SITE_NO, division, segment"
+                  className="pl-11"
+                />
+              </div>
+            </label>
+
+            <label className="min-w-0 space-y-2">
               <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
                 วันที่
               </span>
@@ -158,56 +192,61 @@ export function ProjectsTableSection({
                   ทุกวัน
                 </Button>
               </div>
-            </div>
-            <div className="min-w-0 space-y-2">
+            </label>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center justify-between gap-3">
               <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
                 LADDER
               </span>
-              <div className="flex flex-nowrap gap-2 overflow-x-auto pb-1">
+              <span className="text-xs text-[var(--muted-foreground)]">
+                {selectedBuckets.length > 0 ? `${selectedBuckets.length} selected` : "ทั้งหมด"}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="chip"
+                size="sm"
+                className="shrink-0"
+                data-active={selectedBuckets.length === 0}
+                onClick={onClearBuckets}
+              >
+                ทั้งหมด
+              </Button>
+              {bucketLabels.map((bucket) => (
                 <Button
+                  key={bucket.key}
                   variant="chip"
                   size="sm"
                   className="shrink-0"
-                  data-active={selectedBuckets.length === 0}
-                  onClick={onClearBuckets}
+                  data-active={selectedBuckets.includes(bucket.key)}
+                  onClick={() => onToggleBucket(bucket.key)}
                 >
-                  ทั้งหมด
+                  {bucket.key}
                 </Button>
-                {bucketLabels.map((bucket) => (
-                  <Button
-                    key={bucket.key}
-                    variant="chip"
-                    size="sm"
-                    className="shrink-0"
-                    data-active={selectedBuckets.includes(bucket.key)}
-                    onClick={() => onToggleBucket(bucket.key)}
-                  >
-                    {bucket.key}
-                  </Button>
-                ))}
-              </div>
+              ))}
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="mt-4 border-t border-[var(--border)] pt-3">
             {activeTableFilters.length > 0 ? (
-              <div className="flex min-w-0 flex-nowrap gap-2 overflow-x-auto pb-1">
+              <div className="flex min-w-0 flex-wrap gap-2">
                 {activeTableFilters.map((filter) => (
                   <span
                     key={`${filter.label}-${filter.value}`}
-                    className="inline-flex max-w-[520px] shrink-0 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--foreground)]"
+                    className="inline-flex max-w-full items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--foreground)] shadow-sm md:max-w-[520px]"
                   >
-                    <strong className="shrink-0 font-semibold">{filter.label}</strong>
+                    <strong className="shrink-0 font-bold">{filter.label}</strong>
                     <span className="truncate">{filter.value}</span>
                   </span>
                 ))}
               </div>
             ) : (
-              <div className="text-sm text-[var(--muted-foreground)]">ยังไม่ได้เลือก filter ตาราง</div>
+              <div className="rounded-[16px] border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted-foreground)]">
+                ยังไม่ได้เลือก filter ตาราง
+              </div>
             )}
-            <Button variant="outline" size="sm" onClick={onResetTableFilters}>
-              ล้างตัวกรอง
-            </Button>
           </div>
         </div>
 
@@ -222,23 +261,17 @@ export function ProjectsTableSection({
             </div>
           ) : (
             <>
-              {projectLoading && hasLoadedProjects ? (
-                <div className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-3 text-sm text-[var(--muted-foreground)]">
-                  กำลังอัปเดตรายการโครงการตาม filter ล่าสุด...
-                </div>
-              ) : null}
-
-              <div className={tableWrapClass}>
-                <div className="overflow-x-auto">
+              <div className={cn(tableWrapClass, "shadow-[0_18px_36px_var(--shadow-color)]")}>
+                <div className="max-h-[680px] overflow-auto">
                   <table className={tableBaseClass}>
-                    <thead className="bg-[var(--surface-strong)] text-left">
+                    <thead className="sticky top-0 z-10 bg-[var(--surface-strong)] text-left shadow-[0_1px_0_var(--border)]">
                       <tr className="text-xs uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
-                        <th className="sticky top-0 px-4 py-4">SITE_NO</th>
-                        <th className="sticky top-0 px-4 py-4">SITE_NAME</th>
-                        <th className="sticky top-0 px-4 py-4">Division</th>
-                        <th className="sticky top-0 px-4 py-4">Segment</th>
-                        <th className="sticky top-0 px-4 py-4">Ladder</th>
-                        <th className="sticky top-0 px-4 py-4">
+                        <th className="px-4 py-4">SITE_NO</th>
+                        <th className="min-w-[260px] px-4 py-4">SITE_NAME</th>
+                        <th className="px-4 py-4">Division</th>
+                        <th className="px-4 py-4">Segment</th>
+                        <th className="px-4 py-4">Ladder</th>
+                        <th className="px-4 py-4">
                           <HeaderWithHint
                             hintKey="baseline"
                             label="Baseline"
@@ -247,7 +280,7 @@ export function ProjectsTableSection({
                             onToggle={onToggleHint}
                           />
                         </th>
-                        <th className="sticky top-0 px-4 py-4">
+                        <th className="px-4 py-4">
                           <HeaderWithHint
                             hintKey="current"
                             label="Current"
@@ -256,7 +289,7 @@ export function ProjectsTableSection({
                             onToggle={onToggleHint}
                           />
                         </th>
-                        <th className="sticky top-0 px-4 py-4">
+                        <th className="px-4 py-4">
                           <HeaderWithHint
                             hintKey="increase"
                             label="Increase vs Baseline"
@@ -265,7 +298,7 @@ export function ProjectsTableSection({
                             onToggle={onToggleHint}
                           />
                         </th>
-                        <th className="sticky top-0 px-4 py-4">
+                        <th className="px-4 py-4">
                           <HeaderWithHint
                             hintKey="baselineDisc"
                             label="Disc Baseline (%)"
@@ -275,7 +308,7 @@ export function ProjectsTableSection({
                             onToggle={onToggleHint}
                           />
                         </th>
-                        <th className="sticky top-0 px-4 py-4">
+                        <th className="px-4 py-4">
                           <HeaderWithHint
                             hintKey="currentDisc"
                             label="Disc Current (%)"
@@ -285,7 +318,7 @@ export function ProjectsTableSection({
                             onToggle={onToggleHint}
                           />
                         </th>
-                        <th className="sticky top-0 px-4 py-4">
+                        <th className="px-4 py-4">
                           <HeaderWithHint
                             hintKey="discount"
                             label="Discount Drop (%)"
@@ -295,7 +328,7 @@ export function ProjectsTableSection({
                             onToggle={onToggleHint}
                           />
                         </th>
-                        <th className="sticky top-0 px-4 py-4">
+                        <th className="px-4 py-4">
                           <HeaderWithHint
                             hintKey="latestDay"
                             label={selectedDay ? "Selected day" : "Day"}
@@ -313,11 +346,13 @@ export function ProjectsTableSection({
                           key={row.siteNo}
                           onClick={() => onSelectSite(row.siteNo)}
                           className={cn(
-                            "cursor-pointer border-t border-[var(--border)] transition hover:bg-[var(--surface-strong)]",
+                            "group cursor-pointer border-t border-[var(--border)] transition hover:bg-[var(--surface-strong)]",
                             selectedSite === row.siteNo && "bg-[var(--primary-soft)]"
                           )}
                         >
-                          <td className="px-4 py-4 align-top font-medium">{row.siteNo}</td>
+                          <td className="px-4 py-4 align-top">
+                            <span className="font-semibold text-[var(--foreground)]">{row.siteNo}</span>
+                          </td>
                           <td className="px-4 py-4 align-top">
                             <div className="space-y-1">
                               <strong className="block text-sm font-semibold text-[var(--foreground)]">{row.siteName}</strong>
@@ -328,16 +363,20 @@ export function ProjectsTableSection({
                           </td>
                           <td className="px-4 py-4 align-top">{row.divisionName || "-"}</td>
                           <td className="px-4 py-4 align-top">{row.segment || "-"}</td>
-                          <td className="px-4 py-4 align-top">{row.ladder}</td>
-                          <td className="px-4 py-4 align-top">{formatNumber(row.baselineNetPrice)}</td>
-                          <td className="px-4 py-4 align-top">{formatNumber(row.currentNetPrice)}</td>
-                          <td className="px-4 py-4 align-top">{formatNumber(row.increaseAmount)}</td>
-                          <td className="px-4 py-4 align-top">{formatPercent(row.baselineDisc)}</td>
-                          <td className="px-4 py-4 align-top">{formatPercent(row.currentDisc)}</td>
                           <td className="px-4 py-4 align-top">
+                            <span className="inline-flex rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-bold text-[var(--foreground)]">
+                              {row.ladder}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 align-top tabular-nums">{formatNumber(row.baselineNetPrice)}</td>
+                          <td className="px-4 py-4 align-top tabular-nums">{formatNumber(row.currentNetPrice)}</td>
+                          <td className="px-4 py-4 align-top tabular-nums">{formatNumber(row.increaseAmount)}</td>
+                          <td className="px-4 py-4 align-top tabular-nums">{formatPercent(row.baselineDisc)}</td>
+                          <td className="px-4 py-4 align-top tabular-nums">{formatPercent(row.currentDisc)}</td>
+                          <td className="px-4 py-4 align-top tabular-nums">
                             {formatDiscountDropPoints(row.baselineDisc, row.currentDisc)}
                           </td>
-                          <td className="px-4 py-4 align-top">{row.latestDay}</td>
+                          <td className="px-4 py-4 align-top tabular-nums">{row.latestDay}</td>
                         </tr>
                       ))}
                     </tbody>

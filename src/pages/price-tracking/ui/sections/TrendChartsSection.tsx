@@ -627,9 +627,10 @@ export function TrendChartsSection({
                     stroke="#fb7185"
                     strokeWidth={3}
                     dot
-                    label={renderAveragePointLabel}
                     name="Average increase"
-                  />
+                  >
+                    <LabelList dataKey="avgIncrease" content={renderAveragePointLabel} />
+                  </Line>
                 </LineChart>
                 </ResponsiveContainer>
               </div>
