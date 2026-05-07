@@ -156,6 +156,7 @@ type FreshnessMetadata = {
   isStale: boolean;
   isRefreshing: boolean;
   hasData: boolean;
+  refreshError: string | null;
 };
 
 type FilteredSnapshotArtifacts = {
@@ -525,7 +526,8 @@ function buildFreshnessMetadata(snapshot: LoadedCompanySnapshot | null): Freshne
       snapshotFetchedAt: null,
       isStale: true,
       isRefreshing: Boolean(pendingRefreshPromise),
-      hasData: false
+      hasData: false,
+      refreshError: lastRefreshError
     };
   }
 
@@ -536,7 +538,8 @@ function buildFreshnessMetadata(snapshot: LoadedCompanySnapshot | null): Freshne
     snapshotFetchedAt: snapshot.fetchedAt,
     isStale,
     isRefreshing: Boolean(pendingRefreshPromise),
-    hasData: true
+    hasData: true,
+    refreshError: lastRefreshError
   };
 }
 

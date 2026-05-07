@@ -164,6 +164,7 @@ export type ProjectResponse = {
   isStale?: boolean;
   isRefreshing?: boolean;
   hasData?: boolean;
+  refreshError?: string | null;
 };
 
 export type DashboardResponse = {
@@ -176,6 +177,7 @@ export type DashboardResponse = {
   isStale?: boolean;
   isRefreshing?: boolean;
   hasData?: boolean;
+  refreshError?: string | null;
 };
 
 export type ProjectTrendResponse = {
@@ -185,6 +187,7 @@ export type ProjectTrendResponse = {
   isStale?: boolean;
   isRefreshing?: boolean;
   hasData?: boolean;
+  refreshError?: string | null;
 };
 
 export type PriceTrackingBootstrapResponse = {
@@ -203,6 +206,7 @@ export type PriceTrackingBootstrapResponse = {
   isStale?: boolean;
   isRefreshing?: boolean;
   hasData?: boolean;
+  refreshError?: string | null;
 };
 
 export type TrendRange = "all" | "post25" | "last14" | "last7" | "custom";

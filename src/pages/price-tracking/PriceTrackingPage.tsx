@@ -220,6 +220,7 @@ export function PriceTrackingPage({
   const [dashboardError, setDashboardError] = useState("");
   const [projectError, setProjectError] = useState("");
   const [hasDashboardData, setHasDashboardData] = useState(cachedBootstrap?.hasData !== false);
+  const [dashboardRefreshError, setDashboardRefreshError] = useState(cachedBootstrap?.refreshError ?? "");
   const showDashboardSlowNotice = useDelayedFlag(isBootstrapping || isRefreshingDashboard, 1400);
   const showProjectSlowNotice = useDelayedFlag(isRefreshingProjects, 1400);
   const showSelectedTrendSlowNotice = useDelayedFlag(isRefreshingSelectedTrend, 1400);
@@ -304,6 +305,7 @@ export function PriceTrackingPage({
     trend: TrendPoint[];
     divisionPriceTrend: DivisionPriceTrendPoint[];
     hasData?: boolean;
+    refreshError?: string | null;
   }) => {
     setMeta(response.meta);
     setBaselineStart(response.meta.config.baselineStart);
@@ -312,6 +314,7 @@ export function PriceTrackingPage({
     setTrend(response.trend);
     setDivisionPriceTrend(response.divisionPriceTrend ?? []);
     setHasDashboardData(response.hasData !== false);
+    setDashboardRefreshError(response.refreshError ?? "");
   };
   const applyProjectsResponse = (
     response: Pick<ProjectResponse, "rows" | "total">,
@@ -438,6 +441,7 @@ export function PriceTrackingPage({
     setIsRefreshingSelectedTrend(false);
     setDashboardError("");
     setProjectError("");
+    setDashboardRefreshError("");
     setHasDashboardData(true);
     setMeta(null);
     setSummary(null);
@@ -1161,7 +1165,9 @@ export function PriceTrackingPage({
                 {!hasDashboardData ? "ยังไม่มี snapshot ข้อมูลในระบบ" : "ยังไม่มีข้อมูลที่ตรงกับตัวกรอง"}
               </strong>
               {!hasDashboardData
-                ? "API ตอบกลับสำเร็จแล้ว แต่ backend ยังไม่มี cache/snapshot สำหรับ dashboard ชุดนี้ จึงแสดงค่าเป็นศูนย์ไว้ก่อน"
+                ? dashboardRefreshError
+                  ? `refresh ข้อมูลไม่สำเร็จ: ${dashboardRefreshError}`
+                  : "API ตอบกลับสำเร็จแล้ว แต่ backend ยังไม่มี cache/snapshot สำหรับ dashboard ชุดนี้ จึงแสดงค่าเป็นศูนย์ไว้ก่อน"
                 : "ลองปรับช่วง Baseline หรือรีเซ็ตตัวกรอง Division / FC, Segment, Channel และ Discount type"}
             </div>
           </div>
