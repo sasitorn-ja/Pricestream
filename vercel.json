@@ -11,7 +11,7 @@
   "crons": [
     {
       "path": "/api/cache/refresh",
-      "schedule": "*/15 0-12 * * *"
+      "schedule": "0 1 * * *"
     }
   ]
 }
