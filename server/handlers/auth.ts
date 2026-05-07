@@ -686,23 +686,31 @@ async function countAdmins() {
 
 async function sendCredentialEmail(email: string, temporaryPassword: string) {
   const loginUrl = getAppBaseUrl();
-  const body = `บัญชี ${APP_BRAND_NAME} ของคุณพร้อมใช้งานแล้ว\n\nEmail: ${email}\nรหัสผ่านสำหรับเข้าใช้งานครั้งแรก: ${temporaryPassword}\nลิงก์เข้าสู่ระบบ: ${loginUrl}\n\nหากเป็นการใช้งานครั้งแรก หลังเข้าสู่ระบบแล้วแนะนำให้เปลี่ยนรหัสผ่านทันที`;
+  const body = `คำขอเข้าใช้งาน ${APP_BRAND_NAME} ได้รับการอนุมัติแล้ว
+
+อีเมลสำหรับเข้าสู่ระบบ: ${email}
+รหัสผ่านชั่วคราว: ${temporaryPassword}
+ลิงก์เข้าสู่ระบบ: ${loginUrl}
+
+กรุณาเข้าสู่ระบบด้วยรหัสผ่านชั่วคราวนี้ แล้วเปลี่ยนรหัสผ่านหลังเข้าใช้งานครั้งแรก
+หากไม่พบอีเมลนี้ใน inbox กรุณาตรวจสอบ Junk/Spam หรือแจ้งผู้ดูแลระบบ`;
   const html = `
     <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #0f172a;">
-      <p>บัญชี ${APP_BRAND_NAME} ของคุณพร้อมใช้งานแล้ว</p>
+      <p>คำขอเข้าใช้งาน <strong>${APP_BRAND_NAME}</strong> ได้รับการอนุมัติแล้ว</p>
       <p>
-        <strong>Email:</strong> ${email}<br />
-        <strong>รหัสผ่านสำหรับเข้าใช้งานครั้งแรก:</strong> ${temporaryPassword}
+        <strong>อีเมลสำหรับเข้าสู่ระบบ:</strong> ${email}<br />
+        <strong>รหัสผ่านชั่วคราว:</strong> ${temporaryPassword}
       </p>
       <p>
         <a href="${loginUrl}" style="display: inline-block; border-radius: 10px; background: #1d8ee5; color: #ffffff; padding: 10px 16px; text-decoration: none; font-weight: 700;">
           เข้าสู่ระบบ Dashboard
         </a>
       </p>
-      <p style="color: #475569;">หากเป็นการใช้งานครั้งแรก หลังเข้าสู่ระบบแล้วแนะนำให้เปลี่ยนรหัสผ่านทันที</p>
+      <p style="color: #475569;">กรุณาเข้าสู่ระบบด้วยรหัสผ่านชั่วคราวนี้ แล้วเปลี่ยนรหัสผ่านหลังเข้าใช้งานครั้งแรก</p>
+      <p style="color: #64748b;">หากไม่พบอีเมลนี้ใน inbox กรุณาตรวจสอบ Junk/Spam หรือแจ้งผู้ดูแลระบบ</p>
     </div>
   `;
-  const subject = `${APP_BRAND_NAME} account ready`;
+  const subject = `รหัสผ่านเข้าใช้งาน ${APP_BRAND_NAME}`;
   const deliveryResult = await sendEmail({
     to: email,
     subject,
@@ -719,20 +727,20 @@ async function sendCredentialEmail(email: string, temporaryPassword: string) {
   return deliveryResult;
 }
 
-function queueCredentialEmail(email: string, temporaryPassword: string): EmailDeliveryResult {
-  void sendCredentialEmail(email, temporaryPassword).catch((error) => {
+async function deliverCredentialEmail(email: string, temporaryPassword: string): Promise<EmailDeliveryResult> {
+  try {
+    return await sendCredentialEmail(email, temporaryPassword);
+  } catch (error) {
     console.error(
       "Credential email delivery failed:",
       error instanceof Error ? error.message : error
     );
-  });
-
-  return {
-    delivered: false,
-    provider: "smtp",
-    queued: true,
-    reason: "ระบบกำลังส่งอีเมลรหัสผ่านให้ผู้ใช้"
-  };
+    return {
+      delivered: false,
+      provider: "smtp",
+      reason: error instanceof Error ? error.message : "Unknown email delivery error"
+    };
+  }
 }
 
 async function createUserRecord(input: {
@@ -870,7 +878,7 @@ export async function approveAccessRequest(
     where id = ${requestId}
   `;
 
-  const emailDelivery = queueCredentialEmail(request.email, temporaryPassword);
+  const emailDelivery = await deliverCredentialEmail(request.email, temporaryPassword);
 
   return {
     user: sanitizeUser(approvedUser),
@@ -966,7 +974,7 @@ export async function createLocalUser(
   });
 
   await sql`delete from auth_access_requests where email = ${email}`;
-  const emailDelivery = queueCredentialEmail(email, temporaryPassword);
+  const emailDelivery = await deliverCredentialEmail(email, temporaryPassword);
 
   return {
     user,

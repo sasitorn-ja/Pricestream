@@ -191,7 +191,7 @@ export function AuthGate({ children }: AuthGateProps) {
       });
       setAuthError("");
       setRequestSuccess(
-        `ส่งคำขอแล้ว หลังจาก admin อนุมัติ ระบบจะส่งรหัสผ่านไปที่อีเมล ${normalizedEmail}`
+        `ส่งคำขอแล้ว ตอนนี้ยังไม่มีอีเมลส่งออก รอ admin อนุมัติก่อน แล้วระบบจะส่งรหัสผ่านชั่วคราวไปที่ ${normalizedEmail}`
       );
       setMode("login");
       setEmail(normalizedEmail);
