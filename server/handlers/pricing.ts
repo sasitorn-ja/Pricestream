@@ -1751,15 +1751,18 @@ export async function forceRefreshRemoteSnapshot() {
   pendingRefreshPromise = (async () => {
     lastRefreshStartedAt = Date.now();
     const owner = `refresh-${randomUUID()}`;
-    const lock = await acquireRefreshLock(owner);
-
-    if (!lock.acquired) {
-      await wait(Math.min(DATA_STRICT_REFRESH_WAIT_MS, 1_000));
-      lastRefreshCompletedAt = Date.now();
-      return;
-    }
+    let lockAcquired = false;
 
     try {
+      const lock = await acquireRefreshLock(owner);
+      lockAcquired = lock.acquired;
+
+      if (!lock.acquired) {
+        await wait(Math.min(DATA_STRICT_REFRESH_WAIT_MS, 1_000));
+        lastRefreshCompletedAt = Date.now();
+        return;
+      }
+
       await refreshAndPersistSnapshots();
       lastRefreshError = null;
       lastRefreshCompletedAt = Date.now();
@@ -1767,7 +1770,13 @@ export async function forceRefreshRemoteSnapshot() {
       lastRefreshError = toReadableError(error);
       throw error;
     } finally {
-      await releaseRefreshLock(owner);
+      if (lockAcquired) {
+        try {
+          await releaseRefreshLock(owner);
+        } catch (error) {
+          console.warn("[pricing] snapshot_lock_release_failed", toReadableError(error));
+        }
+      }
     }
   })();
 

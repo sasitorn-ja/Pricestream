@@ -220,6 +220,9 @@ export function PriceTrackingPage({
   const [dashboardError, setDashboardError] = useState("");
   const [projectError, setProjectError] = useState("");
   const [hasDashboardData, setHasDashboardData] = useState(cachedBootstrap?.hasData !== false);
+  const [dashboardBackendRefreshing, setDashboardBackendRefreshing] = useState(
+    cachedBootstrap?.isRefreshing ?? false
+  );
   const [dashboardRefreshError, setDashboardRefreshError] = useState(cachedBootstrap?.refreshError ?? "");
   const showDashboardSlowNotice = useDelayedFlag(isBootstrapping || isRefreshingDashboard, 1400);
   const showProjectSlowNotice = useDelayedFlag(isRefreshingProjects, 1400);
@@ -305,6 +308,7 @@ export function PriceTrackingPage({
     trend: TrendPoint[];
     divisionPriceTrend: DivisionPriceTrendPoint[];
     hasData?: boolean;
+    isRefreshing?: boolean;
     refreshError?: string | null;
   }) => {
     setMeta(response.meta);
@@ -314,6 +318,7 @@ export function PriceTrackingPage({
     setTrend(response.trend);
     setDivisionPriceTrend(response.divisionPriceTrend ?? []);
     setHasDashboardData(response.hasData !== false);
+    setDashboardBackendRefreshing(response.isRefreshing ?? false);
     setDashboardRefreshError(response.refreshError ?? "");
   };
   const applyProjectsResponse = (
@@ -1096,7 +1101,9 @@ export function PriceTrackingPage({
   const dashboardAlertLabel = !hasDashboardData
     ? dashboardRefreshError
       ? `refresh ข้อมูลไม่สำเร็จ: ${dashboardRefreshError}`
-      : "ยังไม่มี snapshot ข้อมูลในระบบ"
+      : dashboardBackendRefreshing
+        ? "กำลังสร้าง snapshot ข้อมูล กรุณารอสักครู่แล้ว refresh หน้าอีกครั้ง"
+        : "ยังไม่มี snapshot ข้อมูลในระบบ"
     : !hasTrendData
       ? "ยังไม่มีข้อมูลที่ตรงกับตัวกรอง"
       : dashboardError
@@ -1183,12 +1190,18 @@ export function PriceTrackingPage({
           <div className={appShellClass}>
             <div id="dashboard-alert" className="scroll-mt-28 rounded-[22px] border border-[var(--border-strong)] bg-[var(--surface)] px-5 py-4 text-sm leading-6 text-[var(--muted-foreground)] shadow-[0_18px_40px_var(--shadow-color)]">
               <strong className="block text-[var(--foreground)]">
-                {!hasDashboardData ? "ยังไม่มี snapshot ข้อมูลในระบบ" : "ยังไม่มีข้อมูลที่ตรงกับตัวกรอง"}
+                {!hasDashboardData
+                  ? dashboardBackendRefreshing
+                    ? "กำลังสร้าง snapshot ข้อมูล"
+                    : "ยังไม่มี snapshot ข้อมูลในระบบ"
+                  : "ยังไม่มีข้อมูลที่ตรงกับตัวกรอง"}
               </strong>
               {!hasDashboardData
                 ? dashboardRefreshError
                   ? `refresh ข้อมูลไม่สำเร็จ: ${dashboardRefreshError}`
-                  : "API ตอบกลับสำเร็จแล้ว แต่ backend ยังไม่มี cache/snapshot สำหรับ dashboard ชุดนี้ จึงแสดงค่าเป็นศูนย์ไว้ก่อน"
+                  : dashboardBackendRefreshing
+                    ? "backend กำลังดึงข้อมูลจาก DataOcean และบันทึก snapshot ลง Neon กรุณารอสักครู่แล้ว refresh หน้าอีกครั้ง"
+                    : "API ตอบกลับสำเร็จแล้ว แต่ backend ยังไม่มี cache/snapshot สำหรับ dashboard ชุดนี้ จึงแสดงค่าเป็นศูนย์ไว้ก่อน"
                 : "ลองปรับช่วง Baseline หรือรีเซ็ตตัวกรอง Division / FC, Segment, Channel และ Discount type"}
             </div>
           </div>
