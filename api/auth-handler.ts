@@ -13,9 +13,9 @@ import {
   registerAccessRequest,
   updateDataOceanTokenConfig,
   updateUserPermissions
-} from "../../server/handlers/auth.js";
-import type { ApiRequest, ApiResponse } from "../shared/http.js";
-import { readHeaderValue, sendJson } from "../shared/http.js";
+} from "../server/handlers/auth.js";
+import type { ApiRequest, ApiResponse } from "./shared/http.js";
+import { readHeaderValue, sendJson } from "./shared/http.js";
 import {
   assertRateLimit,
   buildClearedSessionCookie,
@@ -23,7 +23,7 @@ import {
   readClientAddress,
   readSessionTokenFromRequest,
   toHttpError
-} from "../../server/services/httpSecurity.js";
+} from "../server/services/httpSecurity.js";
 
 function readSessionToken(req: ApiRequest) {
   return readSessionTokenFromRequest({
@@ -34,8 +34,11 @@ function readSessionToken(req: ApiRequest) {
 
 function readPath(req: ApiRequest) {
   const value = req.query?.path ?? req.params?.path;
-  const parts = Array.isArray(value) ? value : String(value ?? "").split("/");
-  return parts.filter(Boolean);
+  const rawPath = Array.isArray(value) ? value.join("/") : String(value ?? "");
+  return rawPath
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {

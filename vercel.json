@@ -3,6 +3,12 @@
   "installCommand": "npm install",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/api/auth/:path*",
+      "destination": "/api/auth-handler?path=:path*"
+    }
+  ],
   "crons": [
     {
       "path": "/api/cache/refresh",
