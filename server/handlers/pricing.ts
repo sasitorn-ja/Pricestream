@@ -1736,11 +1736,7 @@ async function refreshAndPersistSnapshots() {
     }
   }
 
-  try {
-    await persistSnapshotRowsToDb([...envelopesByCompany.CPAC, ...envelopesByCompany.QMIX]);
-  } catch (error) {
-    console.warn("[pricing] snapshot_db_persist_failed", toReadableError(error));
-  }
+  await persistSnapshotRowsToDb([...envelopesByCompany.CPAC, ...envelopesByCompany.QMIX]);
 }
 
 export async function forceRefreshRemoteSnapshot() {

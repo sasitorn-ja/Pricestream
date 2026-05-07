@@ -75,6 +75,7 @@ type TrendChartsSectionProps = {
   divisionPriceTrendData: DivisionPriceTrendPoint[];
   divisionPriceSeries: string[];
   showDivisionPriceChart: boolean;
+  dataLoading: boolean;
   baselineEnd: string;
   chartRangeStart: string;
   chartRangeEnd: string;
@@ -306,6 +307,7 @@ export function TrendChartsSection({
   divisionPriceTrendData,
   divisionPriceSeries,
   showDivisionPriceChart,
+  dataLoading,
   baselineEnd,
   chartRangeStart,
   chartRangeEnd,
@@ -333,9 +335,6 @@ export function TrendChartsSection({
   const divisionPriceYAxisDomain = DIVISION_PRICE_Y_AXIS_DOMAIN;
   const divisionPriceYAxisTicks = DIVISION_PRICE_Y_AXIS_TICKS;
   const shouldShowEveryDivisionPriceTick = isDailyGranularity || divisionPriceChartData.length <= 14;
-  const shouldRenderAveragePointLabels = filteredAverageTrend.length <= 18;
-  const shouldRenderDivisionPricePointLabels =
-    divisionPriceChartData.length <= 14 && divisionPriceSeries.length <= 3;
   const divisionPriceTrendTable = buildDivisionPriceTrendTable({
     trend: divisionPriceTrendData,
     divisions: divisionPriceSeries,
@@ -390,15 +389,38 @@ export function TrendChartsSection({
     );
   };
 
+  const shouldRenderDivisionPricePointLabel = (seriesIndex: number, pointIndex: number) => {
+    if (divisionPriceChartData.length === 0) {
+      return false;
+    }
+
+    if (divisionPriceChartData.length <= 14 && divisionPriceSeries.length <= 3) {
+      return true;
+    }
+
+    if (divisionPriceSeries.length <= 3) {
+      return pointIndex === 0 || pointIndex === divisionPriceChartData.length - 1 || pointIndex % 2 === 0;
+    }
+
+    const labelsPerDay = Math.max(1, Math.ceil(divisionPriceSeries.length / 3));
+    const labelGroupCount = Math.ceil(divisionPriceSeries.length / labelsPerDay);
+
+    return (pointIndex + seriesIndex) % labelGroupCount === 0;
+  };
+
   const renderDivisionPricePointLabel =
     (seriesIndex: number, color: string) =>
-    ({ x, y, value }: DivisionPricePointLabelProps) => {
+    ({ x, y, value, index }: DivisionPricePointLabelProps) => {
+      const pointIndex = typeof index === "number" ? index : -1;
+
       if (
         typeof x !== "number" ||
         typeof y !== "number" ||
+        pointIndex < 0 ||
         value === null ||
         value === undefined ||
-        !Number.isFinite(Number(value))
+        !Number.isFinite(Number(value)) ||
+        !shouldRenderDivisionPricePointLabel(seriesIndex, pointIndex)
       ) {
         return null;
       }
@@ -543,8 +565,12 @@ export function TrendChartsSection({
         <div className={chartBoxClass}>
           {filteredAverageTrend.length === 0 ? (
             <ChartEmptyState
-              title="ยังไม่มีข้อมูลค่าเฉลี่ยการขึ้นราคา"
-              description="ลองตรวจสอบช่วง Baseline หรือปรับตัวกรอง Division / FC, Segment, Channel และ Discount type"
+              title={dataLoading ? "กำลังโหลด dashboard..." : "ยังไม่มีข้อมูลค่าเฉลี่ยการขึ้นราคา"}
+              description={
+                dataLoading
+                  ? "ระบบกำลังเตรียมข้อมูลล่าสุด หน้านี้จะอัปเดตให้อัตโนมัติ"
+                  : "ลองตรวจสอบช่วง Baseline หรือปรับตัวกรอง Division / FC, Segment, Channel และ Discount type"
+              }
             />
           ) : (
             <div className={cn("h-full min-w-0", isDailyGranularity && "overflow-x-auto")}>
@@ -601,7 +627,7 @@ export function TrendChartsSection({
                     stroke="#fb7185"
                     strokeWidth={3}
                     dot
-                    label={shouldRenderAveragePointLabels ? renderAveragePointLabel : undefined}
+                    label={renderAveragePointLabel}
                     name="Average increase"
                   />
                 </LineChart>
@@ -640,8 +666,12 @@ export function TrendChartsSection({
           <div className={chartBoxClass}>
             {divisionPriceChartData.length === 0 || divisionPriceSeries.length === 0 ? (
               <ChartEmptyState
-                title="ยังไม่มีข้อมูลราคาขายเฉลี่ยตาม Division"
-                description="ข้อมูลส่วนนี้จะแสดงเมื่อมีรายการขายใน Division ที่ตรงกับตัวกรองปัจจุบัน"
+                title={dataLoading ? "กำลังโหลด dashboard..." : "ยังไม่มีข้อมูลราคาขายเฉลี่ยตาม Division"}
+                description={
+                  dataLoading
+                    ? "ระบบกำลังเตรียมข้อมูลล่าสุด หน้านี้จะอัปเดตให้อัตโนมัติ"
+                    : "ข้อมูลส่วนนี้จะแสดงเมื่อมีรายการขายใน Division ที่ตรงกับตัวกรองปัจจุบัน"
+                }
               />
             ) : (
               <div className="flex h-full min-h-0 flex-col gap-3">
@@ -698,11 +728,7 @@ export function TrendChartsSection({
                             strokeWidth={3}
                             dot
                             connectNulls
-                            label={
-                              shouldRenderDivisionPricePointLabels
-                                ? renderDivisionPricePointLabel(index, color)
-                                : undefined
-                            }
+                            label={renderDivisionPricePointLabel(index, color)}
                             name={divisionName}
                           />
                         );
@@ -829,8 +855,12 @@ export function TrendChartsSection({
         <div className={chartBoxClass}>
           {proportionTrendData.length === 0 ? (
             <ChartEmptyState
-              title="ยังไม่มีข้อมูลสัดส่วนโครงการ"
-              description="ลองขยายช่วงวันที่หรือรีเซ็ตตัวกรอง หาก backend มีข้อมูล ระบบจะแสดงกราฟทันทีหลังโหลดเสร็จ"
+              title={dataLoading ? "กำลังโหลด dashboard..." : "ยังไม่มีข้อมูลสัดส่วนโครงการ"}
+              description={
+                dataLoading
+                  ? "ระบบกำลังเตรียมข้อมูลล่าสุด หน้านี้จะอัปเดตให้อัตโนมัติ"
+                  : "ลองขยายช่วงวันที่หรือรีเซ็ตตัวกรอง หาก backend มีข้อมูล ระบบจะแสดงกราฟทันทีหลังโหลดเสร็จ"
+              }
             />
           ) : (
             <div className={cn("h-full min-w-0", isDailyGranularity && "overflow-x-auto")}>
@@ -939,8 +969,12 @@ export function TrendChartsSection({
         <div className={chartBoxClass}>
           {proportionTrendData.length === 0 ? (
             <ChartEmptyState
-              title="ยังไม่มีข้อมูลสัดส่วน Disc ที่ลดลง"
-              description="ลองขยายช่วงวันที่หรือรีเซ็ตตัวกรอง เพื่อให้มีข้อมูลหลัง Baseline สำหรับคำนวณสัดส่วน"
+              title={dataLoading ? "กำลังโหลด dashboard..." : "ยังไม่มีข้อมูลสัดส่วน Disc ที่ลดลง"}
+              description={
+                dataLoading
+                  ? "ระบบกำลังเตรียมข้อมูลล่าสุด หน้านี้จะอัปเดตให้อัตโนมัติ"
+                  : "ลองขยายช่วงวันที่หรือรีเซ็ตตัวกรอง เพื่อให้มีข้อมูลหลัง Baseline สำหรับคำนวณสัดส่วน"
+              }
             />
           ) : (
             <div className={cn("h-full min-w-0", isDailyGranularity && "overflow-x-auto")}>

@@ -758,7 +758,9 @@ export function PriceTrackingPage({
         if (
           remainingFollowups > 0 &&
           !controller.signal.aborted &&
-          (bootstrapResponse.isStale || bootstrapResponse.isRefreshing)
+          (bootstrapResponse.isStale ||
+            bootstrapResponse.isRefreshing ||
+            (bootstrapResponse.hasData === false && !bootstrapResponse.refreshError))
         ) {
           const delay =
             bootstrapResponse.hasData === false
@@ -1066,7 +1068,7 @@ export function PriceTrackingPage({
       ? (targetHitSites / summary.comparableSites) * 100
       : 0;
   const summaryDateRange = formatSummaryDateRange(summary, latestTrendDay);
-  const coldDataLoading = !hasDashboardData && dashboardBackendRefreshing;
+  const coldDataLoading = !hasDashboardData && !dashboardRefreshError;
   const calcHelpContent = buildCalcHelpContent({
     summary,
     summaryDateRange,
@@ -1110,7 +1112,7 @@ export function PriceTrackingPage({
       ? `refresh ข้อมูลไม่สำเร็จ: ${dashboardRefreshError}`
       : dashboardBackendRefreshing
         ? "กำลังโหลดข้อมูลล่าสุด"
-        : "ยังไม่มี snapshot ข้อมูลในระบบ"
+        : "กำลังโหลดข้อมูลล่าสุด"
     : !hasTrendData
       ? "ยังไม่มีข้อมูลที่ตรงกับตัวกรอง"
       : dashboardError
@@ -1201,7 +1203,7 @@ export function PriceTrackingPage({
                 {!hasDashboardData
                   ? dashboardBackendRefreshing
                     ? "กำลังโหลดข้อมูล"
-                    : "ยังไม่มีข้อมูลพร้อมแสดง"
+                    : "กำลังโหลด dashboard..."
                   : "ยังไม่มีข้อมูลที่ตรงกับตัวกรอง"}
               </strong>
               {!hasDashboardData
@@ -1209,7 +1211,7 @@ export function PriceTrackingPage({
                   ? `refresh ข้อมูลไม่สำเร็จ: ${dashboardRefreshError}`
                   : dashboardBackendRefreshing
                     ? "ระบบกำลังดึงข้อมูลล่าสุดจาก DataOcean ใช้เวลาประมาณ 20-30 วินาทีในรอบแรก หน้านี้จะอัปเดตให้อัตโนมัติ"
-                    : "ระบบยังไม่มีข้อมูล cache สำหรับ dashboard ชุดนี้ กรุณาลองใหม่อีกครั้งในอีกสักครู่"
+                    : "ระบบกำลังเตรียมข้อมูลสำหรับ dashboard หน้านี้จะอัปเดตให้อัตโนมัติ"
                 : "ลองปรับช่วง Baseline หรือรีเซ็ตตัวกรอง Division / FC, Segment, Channel และ Discount type"}
             </div>
           </div>
@@ -1228,6 +1230,7 @@ export function PriceTrackingPage({
             divisionPriceTrendData={divisionPriceTrend}
             divisionPriceSeries={divisionPriceChart.divisions}
             showDivisionPriceChart
+            dataLoading={coldDataLoading}
             baselineEnd={meta.config.baselineEnd}
             onSetPriceLadderMode={setPriceLadderMode}
             onSetTrendGranularity={setTrendGranularity}

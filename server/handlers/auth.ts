@@ -73,6 +73,7 @@ const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const DEFAULT_ADMIN_ID = "admin-local";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_PUBLIC_APP_URL = "https://pricing-monitor-green.vercel.app/";
+const LOCAL_AUTH_FALLBACK_TOKEN = "local-dev-admin-session";
 let schemaReady: Promise<void> | null = null;
 let schemaStatus: "idle" | "initializing" | "ready" | "failed" = "idle";
 let schemaFailureMessage = "";
@@ -87,6 +88,23 @@ function normalizeEmail(email: string) {
 
 function isSeededAdminEmail(email: string) {
   return Boolean(DEFAULT_ADMIN_EMAIL) && normalizeEmail(email) === DEFAULT_ADMIN_EMAIL;
+}
+
+function canUseLocalAuthFallback() {
+  return !process.env.VERCEL && process.env.NODE_ENV !== "production";
+}
+
+function toLocalFallbackAdmin(): AuthUser {
+  return {
+    id: DEFAULT_ADMIN_ID,
+    username: DEFAULT_ADMIN_EMAIL,
+    name: "System Admin",
+    email: DEFAULT_ADMIN_EMAIL,
+    role: "admin",
+    company: "CPAC",
+    menuPermissions: ALL_MENU_PERMISSIONS,
+    mustChangePassword: false
+  };
 }
 
 function validateUserEmailPolicy(emailInput: string, errorMessage = "บัญชีผู้ใช้งานทั่วไปต้องใช้อีเมล @scg.com") {
@@ -544,12 +562,34 @@ export async function registerAccessRequest(input: {
 }
 
 export async function loginWithEmailPassword(emailInput: string, password: string) {
-  await ensureSchema();
-  const sql = getSql();
   const email = normalizeEmail(emailInput);
   if (!email || !password) {
     throw new HttpError(400, "กรอกอีเมลและรหัสผ่านให้ครบ");
   }
+
+  if (
+    canUseLocalAuthFallback() &&
+    DEFAULT_ADMIN_EMAIL &&
+    DEFAULT_ADMIN_PASSWORD &&
+    email === DEFAULT_ADMIN_EMAIL &&
+    password === DEFAULT_ADMIN_PASSWORD
+  ) {
+    return {
+      user: toLocalFallbackAdmin(),
+      session: {
+        token: LOCAL_AUTH_FALLBACK_TOKEN,
+        expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString()
+      }
+    };
+  }
+
+  try {
+    await ensureSchema();
+  } catch (error) {
+    throw error;
+  }
+
+  const sql = getSql();
 
   const rows = (await sql`select * from auth_users where email = ${email} limit 1`) as DbUser[];
   const user = rows[0];
@@ -571,13 +611,26 @@ export async function getAuthUserFromToken(token: string) {
     return null;
   }
 
-  await ensureSchema();
+  if (canUseLocalAuthFallback() && token === LOCAL_AUTH_FALLBACK_TOKEN && DEFAULT_ADMIN_EMAIL) {
+    return toLocalFallbackAdmin();
+  }
+
+  try {
+    await ensureSchema();
+  } catch (error) {
+    throw error;
+  }
+
   const user = await getUserBySessionToken(token);
   return user ? toAuthUser(user) : null;
 }
 
 export async function logoutSession(token: string) {
   if (!token) {
+    return;
+  }
+
+  if (canUseLocalAuthFallback() && token === LOCAL_AUTH_FALLBACK_TOKEN) {
     return;
   }
 
