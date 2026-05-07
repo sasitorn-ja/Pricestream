@@ -36,11 +36,16 @@ async function canAdminRefreshCache(req: ApiRequest) {
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
-  if (String(req.method ?? "GET").toUpperCase() !== "POST") {
+  const method = String(req.method ?? "GET").toUpperCase();
+
+  if (method !== "GET" && method !== "POST") {
     return sendJson(res, { error: "Method not allowed" }, 405);
   }
 
-  if (!canRefreshCache(req) && !(await canAdminRefreshCache(req))) {
+  const isTokenAuthorized = canRefreshCache(req);
+  const isAdminAuthorized = method === "POST" ? await canAdminRefreshCache(req) : false;
+
+  if (!isTokenAuthorized && !isAdminAuthorized) {
     return sendJson(res, { error: "Unauthorized cache refresh request." }, 401);
   }
 

@@ -290,9 +290,17 @@ app.get("/api/cache/status", async (req, res) => {
   }
 });
 
-app.post("/api/cache/refresh", async (req, res) => {
+app.all("/api/cache/refresh", async (req, res) => {
   try {
+    const method = String(req.method ?? "GET").toUpperCase();
+    if (method !== "GET" && method !== "POST") {
+      throw new HttpError(405, "Method not allowed");
+    }
+
     if (!canRefreshCache(req)) {
+      if (method !== "POST") {
+        throw new HttpError(401, "Unauthorized cache refresh request.");
+      }
       await requireAdminUser(req);
     }
     await forceRefreshRemoteSnapshot();
