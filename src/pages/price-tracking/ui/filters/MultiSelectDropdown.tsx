@@ -1,5 +1,7 @@
+import { ChevronDown } from "lucide-react";
 import { useEffect, useRef } from "react";
-
+import { Button } from "../../../../components/ui/button";
+import { cn } from "../../../../lib/utils";
 import { summarizeMultiSelect } from "../../utils/filters";
 
 type MultiSelectDropdownProps = {
@@ -64,7 +66,7 @@ export function MultiSelectDropdown({
   return (
     <details
       ref={dropdownRef}
-      className={`multiSelectDropdown${className ? ` ${className}` : ""}`}
+      className={cn("relative", className)}
       onToggle={(event) => {
         const currentDropdown = event.currentTarget;
 
@@ -72,42 +74,54 @@ export function MultiSelectDropdown({
           return;
         }
 
-        document
-          .querySelectorAll<HTMLDetailsElement>(".topbarSharedFilter details[open]")
-          .forEach((details) => {
-            if (details !== currentDropdown) {
-              details.open = false;
-            }
-          });
+        document.querySelectorAll<HTMLDetailsElement>("[data-filter-root] details[open]").forEach((details) => {
+          if (details !== currentDropdown) {
+            details.open = false;
+          }
+        });
       }}
     >
-      <summary>
-        <span>{label}</span>
-        <strong>{summarizeMultiSelect(selectedValues.map(getOptionLabel), fallbackLabel)}</strong>
+      <summary className="flex h-10 min-w-0 list-none cursor-pointer items-center justify-between gap-1.5 rounded-[16px] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-1.5 text-left text-[12px] text-[var(--foreground)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-[var(--border-strong)] [&::-webkit-details-marker]:hidden">
+        <span className="shrink-0 truncate text-[var(--muted-foreground)]">{label}</span>
+        <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+          <strong className="min-w-0 truncate font-semibold text-[var(--foreground)]">
+            {summarizeMultiSelect(selectedValues.map(getOptionLabel), fallbackLabel)}
+          </strong>
+          <ChevronDown className="size-3.5 shrink-0 text-[var(--muted-foreground)]" />
+        </span>
       </summary>
-      <div className={`multiSelectMenu${menuClassName ? ` ${menuClassName}` : ""}`}>
-        <button
-          type="button"
-          className={`compactFilterChip${optionClassName ? ` ${optionClassName}` : ""} ${selectedValues.length === 0 ? "selected" : ""}`}
+      <div
+        className={cn(
+          "absolute z-30 mt-2 flex max-h-80 min-w-full flex-col gap-2 overflow-auto rounded-[24px] border border-[var(--border)] bg-[var(--surface-strong)] p-3 shadow-[0_24px_60px_rgba(2,8,20,0.38)]",
+          menuClassName
+        )}
+      >
+        <Button
+          variant="chip"
+          size="sm"
+          data-active={selectedValues.length === 0}
+          className={cn("justify-start", optionClassName)}
           onClick={() => {
             onClear();
             closeDropdown();
           }}
         >
           ทั้งหมด
-        </button>
+        </Button>
         {options.map((option) => (
-          <button
+          <Button
             key={option}
-            type="button"
-            className={`compactFilterChip${optionClassName ? ` ${optionClassName}` : ""} ${selectedValues.includes(option) ? "selected" : ""}`}
+            variant="chip"
+            size="sm"
+            data-active={selectedValues.includes(option)}
+            className={cn("justify-start", optionClassName)}
             onClick={() => {
               onToggle(option);
               closeDropdown();
             }}
           >
             {getOptionLabel(option)}
-          </button>
+          </Button>
         ))}
       </div>
     </details>

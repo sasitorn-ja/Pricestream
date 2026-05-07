@@ -9,6 +9,7 @@ export type ApiRequest = {
 export type ApiResponse = {
   status: (code: number) => ApiResponse;
   json: (body: unknown) => void;
+  setHeader?: (name: string, value: string) => void;
 };
 
 export function sendJson(res: ApiResponse, body: unknown, statusCode = 200) {
@@ -30,6 +31,16 @@ export function readQueryValue(
   }
 
   return value ?? "";
+}
+
+export function readCsvValue(
+  source: Record<string, string | string[] | undefined> | undefined,
+  key: string
+) {
+  return readQueryValue(source, key)
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 export function readHeaderValue(

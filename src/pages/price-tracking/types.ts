@@ -81,6 +81,7 @@ export type TrendPoint = {
 export type DivisionPriceTrendPoint = {
   day: string;
   divisionName: string;
+  fcName?: string;
   avgNetPrice: number;
   siteCount: number;
 };
@@ -158,6 +159,11 @@ export type ProjectTrendChartPoint = Omit<ProjectTrendPoint, "postNetPrice"> & {
 export type ProjectResponse = {
   rows: ProjectRow[];
   total: number;
+  generatedAt: string;
+  snapshotFetchedAt: string | null;
+  isStale?: boolean;
+  isRefreshing?: boolean;
+  hasData?: boolean;
 };
 
 export type DashboardResponse = {
@@ -165,9 +171,41 @@ export type DashboardResponse = {
   summary: SummaryResponse;
   trend: TrendPoint[];
   divisionPriceTrend: DivisionPriceTrendPoint[];
+  generatedAt: string;
+  snapshotFetchedAt: string | null;
+  isStale?: boolean;
+  isRefreshing?: boolean;
+  hasData?: boolean;
 };
 
-export type TrendRange = "all" | "post25" | "last14" | "last7";
+export type ProjectTrendResponse = {
+  rows: ProjectTrendPoint[];
+  generatedAt: string;
+  snapshotFetchedAt: string | null;
+  isStale?: boolean;
+  isRefreshing?: boolean;
+  hasData?: boolean;
+};
+
+export type PriceTrackingBootstrapResponse = {
+  meta: MetaResponse;
+  summary: SummaryResponse;
+  trend: TrendPoint[];
+  divisionPriceTrend: DivisionPriceTrendPoint[];
+  projects: {
+    rows: ProjectRow[];
+    total: number;
+  };
+  selectedSite: string;
+  selectedProjectTrend: ProjectTrendPoint[];
+  generatedAt: string;
+  snapshotFetchedAt: string | null;
+  isStale?: boolean;
+  isRefreshing?: boolean;
+  hasData?: boolean;
+};
+
+export type TrendRange = "all" | "post25" | "last14" | "last7" | "custom";
 export type PriceLadderMode = "summary" | "detail";
 export type TrendGranularity = "daily" | "weekly";
 export type CalcHelpKey =
@@ -177,5 +215,6 @@ export type CalcHelpKey =
   | "proportionChart"
   | "discountDropChart"
   | "averageTrend"
+  | "divisionPriceTrendTable"
   | "projectTrend"
   | "projectTable";

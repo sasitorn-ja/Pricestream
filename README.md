@@ -1,4 +1,4 @@
-# Pricing Monitor Dashboard
+# CPAC Dashboard
 
 Dashboard สำหรับวิเคราะห์ว่าโครงการไหนยังขึ้นราคาไม่ถึงเป้า `300 บาท` โดยใช้ `NP_AVG` เป็น `net price` และดึงข้อมูลสดจาก DataOcean API
 
@@ -39,11 +39,11 @@ Backend API จะอยู่ที่ `http://localhost:8787`
 ถ้าใช้ระบบอนุมัติผู้ใช้งานผ่านอีเมล ให้ตั้งค่า SMTP เพิ่มใน `.env`
 
 ```bash
-SMTP_HOST=smtp-mail.outlook.com
+SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_USER=your-account@hotmail.com
-SMTP_PASS=your-password-or-app-password
-MAIL_FROM="Pricing Monitor <your-account@hotmail.com>"
+SMTP_USER=devcpacadmin@gmail.com
+SMTP_PASS="your-gmail-app-password"
+MAIL_FROM="CPAC Dashboard <devcpacadmin@gmail.com>"
 ```
 
 สำหรับ production ให้เปลี่ยนเป็น URL จริงของหน้าแอป เช่น `https://your-app.vercel.app`

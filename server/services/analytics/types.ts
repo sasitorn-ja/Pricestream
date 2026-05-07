@@ -65,6 +65,7 @@ export type TrendPoint = {
 export type DivisionPriceTrendPoint = {
   day: string;
   divisionName: string;
+  fcName?: string;
   avgNetPrice: number;
   siteCount: number;
 };

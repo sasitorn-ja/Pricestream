@@ -1,5 +1,6 @@
-import { DiscountTypeCheckboxGroup } from "../filters/DiscountTypeCheckboxGroup";
+import { Button } from "../../../../components/ui/button";
 import { DivisionFcFilter } from "../filters/DivisionFcFilter";
+import { DiscountTypeCheckboxGroup } from "../filters/DiscountTypeCheckboxGroup";
 
 type CompactDashboardFiltersProps = {
   availableDivisions: string[];
@@ -47,9 +48,11 @@ export function CompactDashboardFilters({
   onClearDiscountTypes
 }: CompactDashboardFiltersProps) {
   return (
-    <div className="compactFilterDock">
-      <div className="compactFilterRow">
-        <span className="compactFilterLabel">DIVISION</span>
+    <div className="space-y-5 rounded-[24px] border border-[var(--border)] bg-[var(--surface-muted)] p-4">
+      <div className="space-y-3">
+        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+          Division
+        </span>
         <DivisionFcFilter
           divisions={availableDivisions}
           fcNamesByDivision={fcNamesByDivision}
@@ -62,54 +65,54 @@ export function CompactDashboardFilters({
         />
       </div>
 
-      <div className="compactFilterRow">
-        <span className="compactFilterLabel">SEGMENT</span>
-        <div className="compactFilterChips">
-          <button
-            type="button"
-            className={`compactFilterChip ${selectedSegments.length === 0 ? "selected" : ""}`}
-            onClick={onClearSegments}
-          >
+      <div className="space-y-3">
+        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+          Segment
+        </span>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="chip" size="sm" data-active={selectedSegments.length === 0} onClick={onClearSegments}>
             ทั้งหมด
-          </button>
+          </Button>
           {availableSegments.map((segment) => (
-            <button
+            <Button
               key={segment}
-              type="button"
-              className={`compactFilterChip ${selectedSegments.includes(segment) ? "selected" : ""}`}
+              variant="chip"
+              size="sm"
+              data-active={selectedSegments.includes(segment)}
               onClick={() => onToggleSegment(segment)}
             >
               {segment}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
-      <div className="compactFilterRow">
-        <span className="compactFilterLabel">CHANNEL</span>
-        <div className="compactFilterChips">
-          <button
-            type="button"
-            className={`compactFilterChip ${selectedChannels.length === 0 ? "selected" : ""}`}
-            onClick={onClearChannels}
-          >
+      <div className="space-y-3">
+        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+          Channel
+        </span>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="chip" size="sm" data-active={selectedChannels.length === 0} onClick={onClearChannels}>
             ทั้งหมด
-          </button>
+          </Button>
           {availableChannels.map((channel) => (
-            <button
+            <Button
               key={channel}
-              type="button"
-              className={`compactFilterChip ${selectedChannels.includes(channel) ? "selected" : ""}`}
+              variant="chip"
+              size="sm"
+              data-active={selectedChannels.includes(channel)}
               onClick={() => onToggleChannel(channel)}
             >
               {channel}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
-      <div className="compactFilterRow">
-        <span className="compactFilterLabel">DISCOUNT_TYPE</span>
+      <div className="space-y-3">
+        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+          Discount Type
+        </span>
         <DiscountTypeCheckboxGroup
           options={availableDiscountTypes}
           selectedValues={selectedDiscountTypes}

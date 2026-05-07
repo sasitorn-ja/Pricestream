@@ -8,9 +8,12 @@ import { SharedFilterMenuBar } from "./ui/sections/SharedFilterMenuBar";
 import { TrendChartsSection } from "./ui/sections/TrendChartsSection";
 import {
   buildActiveTableFilters,
+  buildDivisionPriceChartData,
   buildProportionTrendData,
   buildSelectedTrendChartData,
   getActiveTrendBucketSeries,
+  getDivisionPriceTrendByGranularity,
+  getFilteredDivisionPriceTrend,
   getFilteredAverageTrend,
   getPostCampaignTrendData,
   getTrendPointsByGranularity
@@ -19,7 +22,6 @@ import {
   type TableColumnHelpKey,
   discountDropSeries,
   FILTER_DEBOUNCE_MS,
-  MULTI_LADDER_FETCH_SIZE,
   PAGE_SIZE,
   SEARCH_DEBOUNCE_MS
 } from "./constants";
@@ -27,23 +29,28 @@ import { buildCalcHelpContent } from "./content/calcHelp";
 import type {
   CalcHelpKey,
   DashboardResponse,
+  DivisionPriceTrendPoint,
   MetaResponse,
   PriceLadderMode,
+  PriceTrackingBootstrapResponse,
   ProjectResponse,
   ProjectRow,
   ProjectTrendPoint,
+  ProjectTrendResponse,
   SummaryResponse,
   TrendGranularity,
   TrendPoint,
   TrendRange
 } from "./types";
-import { buildDashboardFilterQuery } from "./utils/filters";
+import { buildCanonicalQueryKey, buildDashboardFilterQuery, normalizeQueryValues } from "./utils/filters";
 import { formatNumber, formatSummaryDateRange, formatThaiDateShort, getPaginationItems } from "./utils/format";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { useDelayedFlag } from "../../hooks/useDelayedFlag";
 import { fetchJson, isAbortError } from "../../services/api/fetchJson";
 import { type AuthUser } from "../../services/auth/authUser";
 import { APP_MENU_LABELS, type AppMenuKey, type CompanyCode } from "../../services/auth/localAuth";
+import { appShellClass } from "../../components/ui/styles";
+import { COMPANY_DASHBOARD_DIVISIONS } from "../../../shared/appConfig";
 
 type PriceTrackingPageProps = {
   authUser: AuthUser;
@@ -60,23 +67,16 @@ type PriceTrackingPageProps = {
 };
 
 const dashboardDivisionAliases: Record<CompanyCode, string[]> = {
-  CPAC: [
-    "CPAC East",
-    "CPAC Metro",
-    "CPAC North",
-    "CPAC Northeast",
-    "CPAC West",
-    "RMC - South Chain"
-  ],
-  QMIX: [
-    "QMix Bangkok",
-    "QMix Central",
-    "QMix East",
-    "QMix North",
-    "QMix Northeast",
-    "QMix South"
-  ]
+  CPAC: [...COMPANY_DASHBOARD_DIVISIONS.CPAC],
+  QMIX: [...COMPANY_DASHBOARD_DIVISIONS.QMIX]
 };
+
+const bootstrapCacheByDivision = new Map<CompanyCode, PriceTrackingBootstrapResponse>();
+const bootstrapQueryCache = new Map<string, PriceTrackingBootstrapResponse>();
+const sharedDashboardCache = new Map<string, DashboardResponse>();
+const sharedProjectsCache = new Map<string, ProjectResponse>();
+const sharedSelectedTrendCache = new Map<string, ProjectTrendResponse>();
+const BOOTSTRAP_REVALIDATE_DELAY_MS = 1_200;
 
 function getDashboardDivisions(availableDivisions: string[], dashboardDivision: CompanyCode) {
   const aliases = new Set(dashboardDivisionAliases[dashboardDivision].map((value) => value.toUpperCase()));
@@ -85,6 +85,18 @@ function getDashboardDivisions(availableDivisions: string[], dashboardDivision: 
 
 function areSameValues(left: string[], right: string[]) {
   return left.length === right.length && left.every((value) => right.includes(value));
+}
+
+function orderCompanyDivisions(divisions: string[], dashboardDivision: CompanyCode) {
+  const preferredOrder: readonly string[] = COMPANY_DASHBOARD_DIVISIONS[dashboardDivision] ?? [];
+  const orderByDivision = new Map(preferredOrder.map((division, index) => [division, index]));
+
+  return [...divisions].sort((left, right) => {
+    const leftOrder = orderByDivision.get(left) ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = orderByDivision.get(right) ?? Number.MAX_SAFE_INTEGER;
+
+    return leftOrder === rightOrder ? left.localeCompare(right) : leftOrder - rightOrder;
+  });
 }
 
 type QueryFilterState = {
@@ -96,6 +108,33 @@ type QueryFilterState = {
   baselineStart: string;
   baselineEnd: string;
 };
+
+function normalizeFilterState(filterState: QueryFilterState): QueryFilterState {
+  return {
+    selectedDivisions: normalizeQueryValues(filterState.selectedDivisions),
+    selectedSegments: normalizeQueryValues(filterState.selectedSegments),
+    selectedChannels: normalizeQueryValues(filterState.selectedChannels),
+    selectedFcNames: normalizeQueryValues(filterState.selectedFcNames),
+    selectedDiscountTypes: normalizeQueryValues(filterState.selectedDiscountTypes),
+    baselineStart: filterState.baselineStart,
+    baselineEnd: filterState.baselineEnd
+  };
+}
+
+function logClientTiming(
+  metric: string,
+  startedAt: number,
+  details: Record<string, string | number | boolean | null> = {}
+) {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  console.info(`[price-tracking-ui] ${metric}`, {
+    durationMs: Math.round(performance.now() - startedAt),
+    ...details
+  });
+}
 
 export function PriceTrackingPage({
   authUser,
@@ -110,51 +149,86 @@ export function PriceTrackingPage({
   hideSidebar = false,
   hideUserActions = false
 }: PriceTrackingPageProps) {
-  const [meta, setMeta] = useState<MetaResponse | null>(null);
-  const [summary, setSummary] = useState<SummaryResponse | null>(null);
-  const [trend, setTrend] = useState<TrendPoint[]>([]);
-  const defaultMetaRef = useRef<MetaResponse | null>(null);
-  const defaultSummaryRef = useRef<SummaryResponse | null>(null);
-  const defaultTrendRef = useRef<TrendPoint[]>([]);
-  const defaultBaselineStartRef = useRef("");
-  const defaultBaselineEndRef = useRef("");
+  const cachedBootstrap = bootstrapCacheByDivision.get(dashboardDivision) ?? null;
+  const cachedDefaultDivisions = dashboardDivisionAliases[dashboardDivision];
+  const hasCachedBootstrap = Boolean(cachedBootstrap);
+  const [meta, setMeta] = useState<MetaResponse | null>(cachedBootstrap?.meta ?? null);
+  const [summary, setSummary] = useState<SummaryResponse | null>(cachedBootstrap?.summary ?? null);
+  const [trend, setTrend] = useState<TrendPoint[]>(cachedBootstrap?.trend ?? []);
+  const [divisionPriceTrend, setDivisionPriceTrend] = useState<DivisionPriceTrendPoint[]>(
+    cachedBootstrap?.divisionPriceTrend ?? []
+  );
   const dashboardRequestIdRef = useRef(0);
   const projectRequestIdRef = useRef(0);
   const selectedTrendRequestIdRef = useRef(0);
-  const [projectRows, setProjectRows] = useState<ProjectRow[]>([]);
-  const [projectTotal, setProjectTotal] = useState(0);
+  const hasMountedRef = useRef(false);
+  const selectedSiteRef = useRef(cachedBootstrap?.selectedSite ?? "");
+  const skipNextBootstrapRefreshRef = useRef(false);
+  const skipNextSelectedTrendRefreshRef = useRef(false);
+  const previousTableFilterResetKeyRef = useRef("");
+  const pendingPageResetRef = useRef(false);
+  const dashboardCacheRef = useRef(sharedDashboardCache);
+  const projectsCacheRef = useRef(sharedProjectsCache);
+  const selectedTrendCacheRef = useRef(sharedSelectedTrendCache);
+  const [projectRows, setProjectRows] = useState<ProjectRow[]>(cachedBootstrap?.projects.rows ?? []);
+  const [projectTotal, setProjectTotal] = useState(cachedBootstrap?.projects.total ?? 0);
   const [selectedBuckets, setSelectedBuckets] = useState<string[]>([]);
   const [selectedDay, setSelectedDay] = useState("");
   const [search, setSearch] = useState("");
-  const [selectedDivisions, setSelectedDivisions] = useState<string[]>([]);
+  const [baseDashboardDivisions, setBaseDashboardDivisions] = useState<string[]>(cachedDefaultDivisions);
+  const [baseDashboardFcNamesByDivision, setBaseDashboardFcNamesByDivision] = useState<Record<string, string[]>>(
+    cachedBootstrap?.meta.filters?.fcNamesByDivision ?? {}
+  );
+  const [baseDashboardSegments, setBaseDashboardSegments] = useState<string[]>(
+    cachedBootstrap?.meta.filters?.segments ?? []
+  );
+  const [baseDashboardChannels, setBaseDashboardChannels] = useState<string[]>(
+    cachedBootstrap?.meta.filters?.channels ?? []
+  );
+  const [baseDashboardDiscountTypes, setBaseDashboardDiscountTypes] = useState<string[]>(
+    cachedBootstrap?.meta.filters?.discountTypes ?? []
+  );
+  const [selectedDivisions, setSelectedDivisions] = useState<string[]>(cachedDefaultDivisions);
   const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
   const [selectedFcNames, setSelectedFcNames] = useState<string[]>([]);
   const [selectedDiscountTypes, setSelectedDiscountTypes] = useState<string[]>([]);
-  const [baselineStart, setBaselineStart] = useState("");
-  const [baselineEnd, setBaselineEnd] = useState("");
-  const [selectedSite, setSelectedSite] = useState("");
-  const [selectedTrend, setSelectedTrend] = useState<ProjectTrendPoint[]>([]);
-  const [selectedTrendLoading, setSelectedTrendLoading] = useState(false);
+  const [baselineStart, setBaselineStart] = useState(cachedBootstrap?.meta.config.baselineStart ?? "");
+  const [baselineEnd, setBaselineEnd] = useState(cachedBootstrap?.meta.config.baselineEnd ?? "");
+  const [selectedSite, setSelectedSite] = useState(cachedBootstrap?.selectedSite ?? "");
+  const [selectedTrend, setSelectedTrend] = useState<ProjectTrendPoint[]>(
+    cachedBootstrap?.selectedProjectTrend ?? []
+  );
+  const [isRefreshingSelectedTrend, setIsRefreshingSelectedTrend] = useState(false);
   const [trendRange, setTrendRange] = useState<TrendRange>("all");
+  const [chartRangeStart, setChartRangeStart] = useState("");
+  const [chartRangeEnd, setChartRangeEnd] = useState("");
   const [priceLadderMode, setPriceLadderMode] = useState<PriceLadderMode>("summary");
   const [trendGranularity, setTrendGranularity] = useState<TrendGranularity>("daily");
   const [currentPage, setCurrentPage] = useState(1);
-  const [hasLoadedSummary, setHasLoadedSummary] = useState(false);
-  const [hasLoadedProjects, setHasLoadedProjects] = useState(false);
+  const [hasLoadedProjects, setHasLoadedProjects] = useState(hasCachedBootstrap);
   const [activeHint, setActiveHint] = useState<TableColumnHelpKey | null>(null);
   const [activeCalcHelp, setActiveCalcHelp] = useState<CalcHelpKey | null>(null);
-  const [metaLoading, setMetaLoading] = useState(true);
-  const [dashboardLoading, setDashboardLoading] = useState(false);
-  const [projectLoading, setProjectLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [adminNotificationSummary, setAdminNotificationSummary] = useState({
+    pendingRequestCount: 0,
+    dataOceanTokenAlert: false,
+    dataOceanDaysRemaining: null as number | null
+  });
+  const [isBootstrapping, setIsBootstrapping] = useState(!hasCachedBootstrap);
+  const [isRefreshingDashboard, setIsRefreshingDashboard] = useState(false);
+  const [isRefreshingProjects, setIsRefreshingProjects] = useState(false);
+  const [dashboardError, setDashboardError] = useState("");
   const [projectError, setProjectError] = useState("");
-  const showDashboardSlowNotice = useDelayedFlag(metaLoading || dashboardLoading, 1400);
-  const showProjectSlowNotice = useDelayedFlag(projectLoading, 1400);
-  const showSelectedTrendSlowNotice = useDelayedFlag(selectedTrendLoading, 1400);
+  const [hasDashboardData, setHasDashboardData] = useState(cachedBootstrap?.hasData !== false);
+  const showDashboardSlowNotice = useDelayedFlag(isBootstrapping || isRefreshingDashboard, 1400);
+  const showProjectSlowNotice = useDelayedFlag(isRefreshingProjects, 1400);
+  const showSelectedTrendSlowNotice = useDelayedFlag(isRefreshingSelectedTrend, 1400);
   const dashboardDefaultDivisions = useMemo(
-    () => getDashboardDivisions(meta?.filters?.divisions ?? [], dashboardDivision),
-    [meta, dashboardDivision]
+    () =>
+      baseDashboardDivisions.length > 0
+        ? baseDashboardDivisions
+        : getDashboardDivisions(meta?.filters?.divisions ?? [], dashboardDivision),
+    [baseDashboardDivisions, meta, dashboardDivision]
   );
   const queryFilterState = useMemo<QueryFilterState>(
     () => ({
@@ -176,17 +250,22 @@ export function PriceTrackingPage({
       baselineEnd
     ]
   );
-  const debouncedQueryFilterState = useDebouncedValue(queryFilterState, FILTER_DEBOUNCE_MS);
+  const canonicalQueryFilterState = useMemo(
+    () => normalizeFilterState(queryFilterState),
+    [queryFilterState]
+  );
+  const normalizedSelectedBuckets = useMemo(
+    () => normalizeQueryValues(selectedBuckets),
+    [selectedBuckets]
+  );
+  const debouncedQueryFilterState = useDebouncedValue(canonicalQueryFilterState, FILTER_DEBOUNCE_MS);
   const debouncedSelectedDay = useDebouncedValue(selectedDay, FILTER_DEBOUNCE_MS);
-  const debouncedSelectedBuckets = useDebouncedValue(selectedBuckets, FILTER_DEBOUNCE_MS);
+  const debouncedSelectedBuckets = useDebouncedValue(normalizedSelectedBuckets, FILTER_DEBOUNCE_MS);
   const debouncedSearch = useDebouncedValue(search.trim(), SEARCH_DEBOUNCE_MS);
 
   const buildFilterQuery = (filterState: QueryFilterState) =>
     buildDashboardFilterQuery({
-      divisions:
-        filterState.selectedDivisions.length > 0 || filterState.selectedFcNames.length > 0
-          ? filterState.selectedDivisions
-          : ["__none__"],
+      divisions: filterState.selectedDivisions,
       segments: filterState.selectedSegments,
       channels: filterState.selectedChannels,
       fcNames: filterState.selectedFcNames,
@@ -194,6 +273,59 @@ export function PriceTrackingPage({
       baselineStart: filterState.baselineStart,
       baselineEnd: filterState.baselineEnd
     });
+
+  const buildCompanyScopedQuery = (params = new URLSearchParams()) => {
+    const nextParams = new URLSearchParams(params);
+    nextParams.set("company", dashboardDivision);
+    return nextParams;
+  };
+  const buildBootstrapQueryParams = (selectedSiteValue?: string) => {
+    const params = buildCompanyScopedQuery(buildFilterQuery(debouncedQueryFilterState));
+    if (debouncedSelectedDay) {
+      params.set("day", debouncedSelectedDay);
+    }
+    if (debouncedSearch) {
+      params.set("search", debouncedSearch);
+    }
+    if (debouncedSelectedBuckets.length > 0) {
+      params.set("ladder", debouncedSelectedBuckets.join(","));
+    }
+    params.set("page", String(currentPage));
+    params.set("pageSize", String(PAGE_SIZE));
+    if (selectedSiteValue) {
+      params.set("selectedSite", selectedSiteValue);
+    }
+    return params;
+  };
+  const buildBootstrapCacheKey = (params: URLSearchParams) => buildCanonicalQueryKey(params);
+  const applyDashboardResponse = (response: {
+    meta: MetaResponse;
+    summary: SummaryResponse;
+    trend: TrendPoint[];
+    divisionPriceTrend: DivisionPriceTrendPoint[];
+    hasData?: boolean;
+  }) => {
+    setMeta(response.meta);
+    setBaselineStart(response.meta.config.baselineStart);
+    setBaselineEnd(response.meta.config.baselineEnd);
+    setSummary(response.summary);
+    setTrend(response.trend);
+    setDivisionPriceTrend(response.divisionPriceTrend ?? []);
+    setHasDashboardData(response.hasData !== false);
+  };
+  const applyProjectsResponse = (
+    response: Pick<ProjectResponse, "rows" | "total">,
+    preferredSite = selectedSite
+  ) => {
+    setProjectRows(response.rows);
+    setProjectTotal(response.total);
+    setHasLoadedProjects(true);
+
+    const stillExists = response.rows.some((row) => row.siteNo === preferredSite);
+    if (!stillExists) {
+      setSelectedSite(response.rows[0]?.siteNo ?? "");
+    }
+  };
 
   const toggleValue = (value: string, setter: Dispatch<SetStateAction<string[]>>) => {
     setter((items) =>
@@ -218,7 +350,9 @@ export function PriceTrackingPage({
       return;
     }
 
-    const fcNamesInDivision = new Set(meta?.filters?.fcNamesByDivision?.[value] ?? []);
+    const fcNamesInDivision = new Set(
+      baseDashboardFcNamesByDivision[value] ?? meta?.filters?.fcNamesByDivision?.[value] ?? []
+    );
 
     setSelectedFcNames((currentFcNames) =>
       currentFcNames.filter((fcName) => !fcNamesInDivision.has(fcName))
@@ -236,6 +370,20 @@ export function PriceTrackingPage({
     });
   };
 
+  const selectOnlyDivision = (value: string) => {
+    if (!dashboardDefaultDivisions.includes(value)) {
+      return;
+    }
+
+    const fcNamesInDivision = new Set(
+      baseDashboardFcNamesByDivision[value] ?? meta?.filters?.fcNamesByDivision?.[value] ?? []
+    );
+    setSelectedFcNames((currentFcNames) =>
+      currentFcNames.filter((fcName) => !fcNamesInDivision.has(fcName))
+    );
+    setSelectedDivisions([value]);
+  };
+
   const toggleFcName = (division: string, fcName: string) => {
     if (!dashboardDefaultDivisions.includes(division)) {
       return;
@@ -249,21 +397,13 @@ export function PriceTrackingPage({
 
       setSelectedDivisions((currentDivisions) => {
         const hasSelectedEveryDivision = areSameValues(currentDivisions, dashboardDefaultDivisions);
-        let nextDivisions = currentDivisions;
 
-        if (isSelecting) {
-          if (hasSelectedEveryDivision) {
-            nextDivisions = [];
-          } else if (currentDivisions.includes(division)) {
-            nextDivisions = currentDivisions.filter((value) => value !== division);
-          }
+        if (nextFcNames.length === 0 || hasSelectedEveryDivision) {
+          return currentDivisions.length > 0 ? currentDivisions : dashboardDefaultDivisions;
         }
 
-        if (nextFcNames.length === 0 && nextDivisions.length === 0) {
-          return dashboardDefaultDivisions;
-        }
-
-        return nextDivisions;
+        const nextDivisions = currentDivisions.filter((value) => value !== division);
+        return nextDivisions.length > 0 ? nextDivisions : dashboardDefaultDivisions;
       });
 
       return nextFcNames;
@@ -287,16 +427,28 @@ export function PriceTrackingPage({
   };
 
   useEffect(() => {
-    setMetaLoading(true);
-    setDashboardLoading(false);
-    setProjectLoading(false);
-    setError("");
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+
+    setIsBootstrapping(true);
+    setIsRefreshingDashboard(false);
+    setIsRefreshingProjects(false);
+    setIsRefreshingSelectedTrend(false);
+    setDashboardError("");
     setProjectError("");
+    setHasDashboardData(true);
     setMeta(null);
     setSummary(null);
     setTrend([]);
-    setHasLoadedSummary(false);
+    setDivisionPriceTrend([]);
     setHasLoadedProjects(false);
+    setBaseDashboardDivisions([]);
+    setBaseDashboardFcNamesByDivision({});
+    setBaseDashboardSegments([]);
+    setBaseDashboardChannels([]);
+    setBaseDashboardDiscountTypes([]);
     setSelectedDivisions([]);
     setSelectedSegments([]);
     setSelectedChannels([]);
@@ -306,32 +458,54 @@ export function PriceTrackingPage({
     setSelectedDay("");
     setSearch("");
     setCurrentPage(1);
-    setSelectedTrendLoading(false);
+    setSelectedSite("");
+    setSelectedTrend([]);
+    selectedSiteRef.current = "";
+    skipNextBootstrapRefreshRef.current = false;
+    skipNextSelectedTrendRefreshRef.current = false;
+    previousTableFilterResetKeyRef.current = "";
+    pendingPageResetRef.current = false;
   }, [dashboardDivision]);
+
+  useEffect(() => {
+    selectedSiteRef.current = selectedSite;
+  }, [selectedSite]);
 
   useEffect(() => {
     const controller = new AbortController();
 
-    async function loadInitialDashboard() {
+    async function loadInitialData() {
+      const startedAt = performance.now();
       try {
-        setMetaLoading(true);
-        setError("");
-        const initialParams = new URLSearchParams({
+        if (!hasCachedBootstrap) {
+          setIsBootstrapping(true);
+        }
+        setDashboardError("");
+        setProjectError("");
+        const initialParams = buildCompanyScopedQuery(new URLSearchParams({
           divisions: dashboardDivisionAliases[dashboardDivision].join(",")
-        });
-        let dashboardResponse = await fetchJson<DashboardResponse>(
-          `/api/dashboard?${initialParams.toString()}`,
-          { signal: controller.signal }
-        );
+        }));
+        initialParams.set("page", "1");
+        initialParams.set("pageSize", String(PAGE_SIZE));
+        const fetchBootstrap = async (params: URLSearchParams) =>
+          fetchJson<PriceTrackingBootstrapResponse>(`/api/price-tracking/bootstrap?${params.toString()}`, {
+            signal: controller.signal
+          });
+        let bootstrapResponse = await fetchBootstrap(initialParams);
         let defaultDivisions = getDashboardDivisions(
-          dashboardResponse.meta.filters?.divisions ?? [],
+          bootstrapResponse.meta.filters?.divisions ?? [],
           dashboardDivision
         );
 
-        if (defaultDivisions.length === 0 && dashboardResponse.summary.comparableSites === 0) {
-          dashboardResponse = await fetchJson<DashboardResponse>("/api/dashboard", {
-            signal: controller.signal
-          });
+        if (
+          bootstrapResponse.hasData !== false &&
+          defaultDivisions.length === 0 &&
+          bootstrapResponse.summary.comparableSites === 0
+        ) {
+          const fallbackParams = buildCompanyScopedQuery();
+          fallbackParams.set("page", "1");
+          fallbackParams.set("pageSize", String(PAGE_SIZE));
+          bootstrapResponse = await fetchBootstrap(fallbackParams);
           defaultDivisions = [];
         }
 
@@ -339,104 +513,248 @@ export function PriceTrackingPage({
           return;
         }
 
-        setMeta(dashboardResponse.meta);
-        defaultMetaRef.current = dashboardResponse.meta;
+        setBaseDashboardDivisions(defaultDivisions);
+        setBaseDashboardFcNamesByDivision(bootstrapResponse.meta.filters?.fcNamesByDivision ?? {});
+        setBaseDashboardSegments(bootstrapResponse.meta.filters?.segments ?? []);
+        setBaseDashboardChannels(bootstrapResponse.meta.filters?.channels ?? []);
+        setBaseDashboardDiscountTypes(bootstrapResponse.meta.filters?.discountTypes ?? []);
         setSelectedDivisions(defaultDivisions);
-        setBaselineStart(dashboardResponse.meta.config.baselineStart);
-        setBaselineEnd(dashboardResponse.meta.config.baselineEnd);
-        defaultBaselineStartRef.current = dashboardResponse.meta.config.baselineStart;
-        defaultBaselineEndRef.current = dashboardResponse.meta.config.baselineEnd;
-        setSummary(dashboardResponse.summary);
-        setTrend(dashboardResponse.trend);
-        defaultSummaryRef.current = dashboardResponse.summary;
-        defaultTrendRef.current = dashboardResponse.trend;
-        setHasLoadedSummary(true);
+        applyDashboardResponse(bootstrapResponse);
+        setProjectRows(bootstrapResponse.projects.rows);
+        setProjectTotal(bootstrapResponse.projects.total);
+        setHasLoadedProjects(true);
+        setSelectedSite(bootstrapResponse.selectedSite);
+        setSelectedTrend(bootstrapResponse.selectedProjectTrend);
+        bootstrapCacheByDivision.set(dashboardDivision, bootstrapResponse);
+        const bootstrapKey = buildBootstrapCacheKey(initialParams);
+        bootstrapQueryCache.set(bootstrapKey, bootstrapResponse);
+
+        const bootstrapFilterState = normalizeFilterState({
+          selectedDivisions: defaultDivisions,
+          selectedSegments: [],
+          selectedChannels: [],
+          selectedFcNames: [],
+          selectedDiscountTypes: [],
+          baselineStart: bootstrapResponse.meta.config.baselineStart,
+          baselineEnd: bootstrapResponse.meta.config.baselineEnd
+        });
+        const dashboardParams = buildCompanyScopedQuery(buildFilterQuery(bootstrapFilterState));
+        const dashboardKey = buildCanonicalQueryKey(dashboardParams);
+        const projectsParams = new URLSearchParams(dashboardParams);
+        projectsParams.set("page", "1");
+        projectsParams.set("pageSize", String(PAGE_SIZE));
+        const projectsKey = buildCanonicalQueryKey(projectsParams);
+        const selectedTrendKey = bootstrapResponse.selectedSite
+          ? `${bootstrapResponse.selectedSite}?${dashboardKey}`
+          : "";
+
+        dashboardCacheRef.current.set(dashboardKey, {
+          meta: bootstrapResponse.meta,
+          summary: bootstrapResponse.summary,
+          trend: bootstrapResponse.trend,
+          divisionPriceTrend: bootstrapResponse.divisionPriceTrend,
+          generatedAt: bootstrapResponse.generatedAt,
+          snapshotFetchedAt: bootstrapResponse.snapshotFetchedAt
+        });
+        projectsCacheRef.current.set(projectsKey, {
+          rows: bootstrapResponse.projects.rows,
+          total: bootstrapResponse.projects.total,
+          generatedAt: bootstrapResponse.generatedAt,
+          snapshotFetchedAt: bootstrapResponse.snapshotFetchedAt
+        });
+        if (selectedTrendKey) {
+          selectedTrendCacheRef.current.set(selectedTrendKey, {
+            rows: bootstrapResponse.selectedProjectTrend,
+            generatedAt: bootstrapResponse.generatedAt,
+            snapshotFetchedAt: bootstrapResponse.snapshotFetchedAt
+          });
+        }
+        skipNextBootstrapRefreshRef.current = true;
+        skipNextSelectedTrendRefreshRef.current = true;
+        logClientTiming("time_to_first_dashboard_render", startedAt, {
+          company: dashboardDivision,
+          projectCount: bootstrapResponse.projects.total
+        });
       } catch (requestError) {
         if (controller.signal.aborted || isAbortError(requestError)) {
           return;
         }
 
-        setError(requestError instanceof Error ? requestError.message : "Unknown error");
+        setDashboardError(requestError instanceof Error ? requestError.message : "Unknown error");
       } finally {
         if (!controller.signal.aborted) {
-          setMetaLoading(false);
+          setIsBootstrapping(false);
         }
       }
     }
 
-    void loadInitialDashboard();
+    void loadInitialData();
 
     return () => controller.abort();
-  }, [dashboardDivision]);
+  }, [dashboardDivision, hasCachedBootstrap]);
+
+  const bootstrapQueryParams = useMemo(
+    () => buildBootstrapQueryParams(selectedSiteRef.current),
+    [
+      debouncedQueryFilterState,
+      debouncedSelectedDay,
+      debouncedSearch,
+      debouncedSelectedBuckets,
+      currentPage,
+      dashboardDivision
+    ]
+  );
+  const bootstrapQueryKey = useMemo(
+    () => buildBootstrapCacheKey(bootstrapQueryParams),
+    [bootstrapQueryParams]
+  );
+  const selectedTrendQueryParams = useMemo(
+    () => buildCompanyScopedQuery(buildFilterQuery(debouncedQueryFilterState)),
+    [debouncedQueryFilterState, dashboardDivision]
+  );
+  const selectedTrendQueryKey = useMemo(() => {
+    const queryKey = buildCanonicalQueryKey(selectedTrendQueryParams);
+    return selectedSite ? `${selectedSite}?${queryKey}` : "";
+  }, [selectedSite, selectedTrendQueryParams]);
+  const tableFilterResetKey = useMemo(
+    () =>
+      JSON.stringify({
+        search: debouncedSearch,
+        selectedBuckets: debouncedSelectedBuckets,
+        selectedDay: debouncedSelectedDay,
+        filters: debouncedQueryFilterState
+      }),
+    [debouncedSearch, debouncedSelectedBuckets, debouncedSelectedDay, debouncedQueryFilterState]
+  );
 
   useEffect(() => {
-    if (!meta) {
+    if (!previousTableFilterResetKeyRef.current) {
+      previousTableFilterResetKeyRef.current = tableFilterResetKey;
+      pendingPageResetRef.current = false;
+      return;
+    }
+
+    if (previousTableFilterResetKeyRef.current !== tableFilterResetKey && currentPage !== 1) {
+      previousTableFilterResetKeyRef.current = tableFilterResetKey;
+      pendingPageResetRef.current = true;
+      setCurrentPage(1);
+      return;
+    }
+
+    previousTableFilterResetKeyRef.current = tableFilterResetKey;
+    pendingPageResetRef.current = false;
+  }, [tableFilterResetKey, currentPage]);
+
+  useEffect(() => {
+    if (isBootstrapping) {
+      return;
+    }
+    if (skipNextBootstrapRefreshRef.current) {
+      skipNextBootstrapRefreshRef.current = false;
+      return;
+    }
+    if (pendingPageResetRef.current) {
       return;
     }
 
     const requestId = ++dashboardRequestIdRef.current;
+    projectRequestIdRef.current = requestId;
     const controller = new AbortController();
 
-    async function loadFilteredDashboard() {
-      const isDefaultBaseline =
-        debouncedQueryFilterState.baselineStart === defaultBaselineStartRef.current &&
-        debouncedQueryFilterState.baselineEnd === defaultBaselineEndRef.current;
-      const isDefaultDashboardView =
-        !debouncedSelectedDay &&
-        areSameValues(debouncedQueryFilterState.selectedDivisions, dashboardDefaultDivisions) &&
-        debouncedQueryFilterState.selectedSegments.length === 0 &&
-        debouncedQueryFilterState.selectedChannels.length === 0 &&
-        debouncedQueryFilterState.selectedFcNames.length === 0 &&
-        debouncedQueryFilterState.selectedDiscountTypes.length === 0 &&
-        isDefaultBaseline;
-
-      if (hasLoadedSummary && isDefaultDashboardView) {
-        if (requestId === dashboardRequestIdRef.current && defaultSummaryRef.current) {
-          setSummary(defaultSummaryRef.current);
-          setTrend(defaultTrendRef.current);
-          if (defaultMetaRef.current) {
-            setMeta(defaultMetaRef.current);
-          }
-          setDashboardLoading(false);
-        }
-        return;
-      }
-
+    async function loadBootstrapData(allowFollowup = true) {
       try {
-        setDashboardLoading(true);
-        setError("");
-        const params = buildFilterQuery(debouncedQueryFilterState);
-        if (debouncedSelectedDay) {
-          params.set("day", debouncedSelectedDay);
+        const startedAt = performance.now();
+        const cachedResponse = bootstrapQueryCache.get(bootstrapQueryKey);
+        if (cachedResponse) {
+          applyDashboardResponse(cachedResponse);
+          applyProjectsResponse(cachedResponse.projects, cachedResponse.selectedSite);
+          if (
+            cachedResponse.selectedSite &&
+            cachedResponse.selectedSite === (selectedSiteRef.current || cachedResponse.selectedSite)
+          ) {
+            setSelectedSite(cachedResponse.selectedSite);
+            setSelectedTrend(cachedResponse.selectedProjectTrend);
+          }
+        } else if (!summary) {
+          setProjectRows([]);
+          setProjectTotal(0);
+          setHasLoadedProjects(false);
+          setSelectedSite("");
+          setSelectedTrend([]);
+          selectedSiteRef.current = "";
         }
-        const query = params.toString();
-        const suffix = query ? `?${query}` : "";
-
-        const dashboardResponse = await fetchJson<DashboardResponse>(`/api/dashboard${suffix}`, {
-          signal: controller.signal
-        });
+        setIsRefreshingDashboard(true);
+        setIsRefreshingProjects(true);
+        setDashboardError("");
+        setProjectError("");
+        const bootstrapResponse = await fetchJson<PriceTrackingBootstrapResponse>(
+          `/api/price-tracking/bootstrap?${bootstrapQueryParams.toString()}`,
+          { signal: controller.signal }
+        );
 
         if (requestId !== dashboardRequestIdRef.current || controller.signal.aborted) {
           return;
         }
 
-        setMeta((currentMeta) => {
-          if (
-            currentMeta &&
-            currentMeta.config.baselineStart === dashboardResponse.meta.config.baselineStart &&
-            currentMeta.config.baselineEnd === dashboardResponse.meta.config.baselineEnd &&
-            currentMeta.config.campaignStart === dashboardResponse.meta.config.campaignStart
-          ) {
-            return currentMeta;
+        bootstrapQueryCache.set(bootstrapQueryKey, bootstrapResponse);
+        dashboardCacheRef.current.set(
+          buildCanonicalQueryKey(buildCompanyScopedQuery(buildFilterQuery(debouncedQueryFilterState))),
+          {
+            meta: bootstrapResponse.meta,
+            summary: bootstrapResponse.summary,
+            trend: bootstrapResponse.trend,
+            divisionPriceTrend: bootstrapResponse.divisionPriceTrend,
+            generatedAt: bootstrapResponse.generatedAt,
+            snapshotFetchedAt: bootstrapResponse.snapshotFetchedAt,
+            isStale: bootstrapResponse.isStale,
+            isRefreshing: bootstrapResponse.isRefreshing,
+            hasData: bootstrapResponse.hasData
           }
-
-          return dashboardResponse.meta;
+        );
+        projectsCacheRef.current.set(bootstrapQueryKey, {
+          rows: bootstrapResponse.projects.rows,
+          total: bootstrapResponse.projects.total,
+          generatedAt: bootstrapResponse.generatedAt,
+          snapshotFetchedAt: bootstrapResponse.snapshotFetchedAt,
+          isStale: bootstrapResponse.isStale,
+          isRefreshing: bootstrapResponse.isRefreshing,
+          hasData: bootstrapResponse.hasData
         });
-        setBaselineStart(dashboardResponse.meta.config.baselineStart);
-        setBaselineEnd(dashboardResponse.meta.config.baselineEnd);
-        setSummary(dashboardResponse.summary);
-        setTrend(dashboardResponse.trend);
-        setHasLoadedSummary(true);
+        applyDashboardResponse(bootstrapResponse);
+        applyProjectsResponse(bootstrapResponse.projects, selectedSiteRef.current);
+        if (
+          bootstrapResponse.selectedSite &&
+          bootstrapResponse.selectedSite === (selectedSiteRef.current || bootstrapResponse.selectedSite)
+        ) {
+          skipNextSelectedTrendRefreshRef.current = true;
+          setSelectedSite(bootstrapResponse.selectedSite);
+          setSelectedTrend(bootstrapResponse.selectedProjectTrend);
+          selectedTrendCacheRef.current.set(`${bootstrapResponse.selectedSite}?${buildCanonicalQueryKey(selectedTrendQueryParams)}`, {
+            rows: bootstrapResponse.selectedProjectTrend,
+            generatedAt: bootstrapResponse.generatedAt,
+            snapshotFetchedAt: bootstrapResponse.snapshotFetchedAt,
+            isStale: bootstrapResponse.isStale,
+            isRefreshing: bootstrapResponse.isRefreshing,
+            hasData: bootstrapResponse.hasData
+          });
+        }
+        logClientTiming("bootstrap_refresh", startedAt, {
+          company: dashboardDivision,
+          hasCachedData: Boolean(cachedResponse),
+          page: currentPage
+        });
+
+        if (
+          allowFollowup &&
+          !controller.signal.aborted &&
+          (bootstrapResponse.isStale || bootstrapResponse.isRefreshing)
+        ) {
+          window.setTimeout(() => {
+            if (!controller.signal.aborted) {
+              void loadBootstrapData(false);
+            }
+          }, BOOTSTRAP_REVALIDATE_DELAY_MS);
+        }
       } catch (requestError) {
         if (
           requestId !== dashboardRequestIdRef.current ||
@@ -446,172 +764,57 @@ export function PriceTrackingPage({
           return;
         }
 
-        setError(requestError instanceof Error ? requestError.message : "Unknown error");
+        setDashboardError(requestError instanceof Error ? requestError.message : "Unknown error");
+        setProjectError(requestError instanceof Error ? requestError.message : "Unknown error");
       } finally {
         if (requestId === dashboardRequestIdRef.current && !controller.signal.aborted) {
-          setDashboardLoading(false);
+          setIsRefreshingDashboard(false);
+          setIsRefreshingProjects(false);
         }
       }
     }
 
-    void loadFilteredDashboard();
+    void loadBootstrapData();
 
     return () => controller.abort();
   }, [
-    hasLoadedSummary,
-    meta,
+    isBootstrapping,
+    pendingPageResetRef,
+    bootstrapQueryKey,
+    bootstrapQueryParams,
+    dashboardDivision,
+    currentPage,
     debouncedQueryFilterState,
-    debouncedSelectedDay,
-    dashboardDefaultDivisions
+    selectedTrendQueryParams
   ]);
 
   useEffect(() => {
-    if (!hasLoadedSummary || !meta) {
+    if (skipNextSelectedTrendRefreshRef.current) {
+      skipNextSelectedTrendRefreshRef.current = false;
       return;
     }
 
-    const requestId = ++projectRequestIdRef.current;
-    const controller = new AbortController();
-
-    async function loadProjects() {
-
-      try {
-        setProjectLoading(true);
-        setProjectError("");
-        const baseParams = buildFilterQuery(debouncedQueryFilterState);
-
-        if (debouncedSelectedDay) {
-          baseParams.set("day", debouncedSelectedDay);
-        }
-
-        if (debouncedSearch) {
-          baseParams.set("search", debouncedSearch);
-        }
-
-        let projectResponse: ProjectResponse;
-
-        if (debouncedSelectedBuckets.length > 1) {
-          const responses = await Promise.all(
-            debouncedSelectedBuckets.map((bucket) => {
-              const params = new URLSearchParams(baseParams);
-              params.set("ladder", bucket);
-              params.set("page", "1");
-              params.set("pageSize", String(MULTI_LADDER_FETCH_SIZE));
-              return fetchJson<ProjectResponse>(`/api/projects?${params.toString()}`, {
-                signal: controller.signal
-              });
-            })
-          );
-          const rows = responses
-            .flatMap((response) => response.rows)
-            .sort((a, b) => {
-              if (a.latestDay === b.latestDay) {
-                if (a.increaseAmount === b.increaseAmount) {
-                  return a.siteName.localeCompare(b.siteName);
-                }
-
-                return a.increaseAmount - b.increaseAmount;
-              }
-
-              return a.latestDay.localeCompare(b.latestDay);
-            });
-          const startIndex = (currentPage - 1) * PAGE_SIZE;
-
-          projectResponse = {
-            rows: rows.slice(startIndex, startIndex + PAGE_SIZE),
-            total: rows.length
-          };
-        } else {
-          const params = new URLSearchParams(baseParams);
-
-          if (debouncedSelectedBuckets.length === 1) {
-            params.set("ladder", debouncedSelectedBuckets[0]);
-          }
-
-          params.set("page", String(currentPage));
-          params.set("pageSize", String(PAGE_SIZE));
-          const query = params.toString();
-          projectResponse = await fetchJson<ProjectResponse>(
-            `/api/projects${query ? `?${query}` : ""}`,
-            { signal: controller.signal }
-          );
-        }
-
-        if (requestId !== projectRequestIdRef.current || controller.signal.aborted) {
-          return;
-        }
-
-        setProjectRows(projectResponse.rows);
-        setProjectTotal(projectResponse.total);
-        setHasLoadedProjects(true);
-
-        const stillExists = projectResponse.rows.some((row) => row.siteNo === selectedSite);
-        if (!stillExists) {
-          setSelectedSite(projectResponse.rows[0]?.siteNo ?? "");
-        }
-      } catch (requestError) {
-        if (
-          requestId !== projectRequestIdRef.current ||
-          controller.signal.aborted ||
-          isAbortError(requestError)
-        ) {
-          return;
-        }
-
-        setProjectError(requestError instanceof Error ? requestError.message : "Unknown error");
-      } finally {
-        if (requestId === projectRequestIdRef.current && !controller.signal.aborted) {
-          setProjectLoading(false);
-        }
-      }
-    }
-
-    void loadProjects();
-
-    return () => controller.abort();
-  }, [
-    currentPage,
-    debouncedSearch,
-    hasLoadedSummary,
-    meta,
-    debouncedQueryFilterState,
-    debouncedSelectedDay,
-    debouncedSelectedBuckets
-  ]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [
-    search,
-    selectedBuckets,
-    selectedDay,
-    baselineStart,
-    baselineEnd,
-    selectedDivisions,
-    selectedSegments,
-    selectedChannels,
-    selectedFcNames,
-    selectedDiscountTypes
-  ]);
-
-  useEffect(() => {
     const controller = new AbortController();
 
     async function loadSelectedTrend() {
       if (!selectedSite) {
         selectedTrendRequestIdRef.current += 1;
         setSelectedTrend([]);
-        setSelectedTrendLoading(false);
+        setIsRefreshingSelectedTrend(false);
         return;
       }
 
       const requestId = ++selectedTrendRequestIdRef.current;
-      setSelectedTrendLoading(true);
+      const startedAt = performance.now();
+      const cachedResponse = selectedTrendCacheRef.current.get(selectedTrendQueryKey);
+      if (cachedResponse) {
+        setSelectedTrend(cachedResponse.rows);
+      }
+      setIsRefreshingSelectedTrend(true);
 
       try {
-        const query = buildFilterQuery(debouncedQueryFilterState).toString();
-        const projectTrend = await fetchJson<ProjectTrendPoint[]>(
-          `/api/projects/${encodeURIComponent(selectedSite)}/trend${query ? `?${query}` : ""}`,
+        const projectTrendResponse = await fetchJson<ProjectTrendResponse>(
+          `/api/projects/${encodeURIComponent(selectedSite)}/trend?${selectedTrendQueryParams.toString()}`,
           { signal: controller.signal }
         );
 
@@ -619,7 +822,12 @@ export function PriceTrackingPage({
           return;
         }
 
-        setSelectedTrend(projectTrend);
+        selectedTrendCacheRef.current.set(selectedTrendQueryKey, projectTrendResponse);
+        setSelectedTrend(projectTrendResponse.rows);
+        logClientTiming("selected_project_trend_refresh", startedAt, {
+          siteNo: selectedSite,
+          hasCachedData: Boolean(cachedResponse)
+        });
       } catch (requestError) {
         if (
           requestId !== selectedTrendRequestIdRef.current ||
@@ -629,10 +837,10 @@ export function PriceTrackingPage({
           return;
         }
 
-        setError(requestError instanceof Error ? requestError.message : "Unknown error");
+        setDashboardError(requestError instanceof Error ? requestError.message : "Unknown error");
       } finally {
         if (requestId === selectedTrendRequestIdRef.current && !controller.signal.aborted) {
-          setSelectedTrendLoading(false);
+          setIsRefreshingSelectedTrend(false);
         }
       }
     }
@@ -642,7 +850,8 @@ export function PriceTrackingPage({
     return () => controller.abort();
   }, [
     selectedSite,
-    debouncedQueryFilterState
+    selectedTrendQueryKey,
+    selectedTrendQueryParams
   ]);
 
   const selectedTrendChartData = useMemo(
@@ -653,13 +862,28 @@ export function PriceTrackingPage({
     () => getPostCampaignTrendData(meta, trend),
     [meta, trend]
   );
+  const chartRangeMinDay = postCampaignTrendData[0]?.day ?? "";
+  const chartRangeMaxDay = postCampaignTrendData.at(-1)?.day ?? "";
+  const effectiveChartRangeStart = chartRangeStart || chartRangeMinDay;
+  const effectiveChartRangeEnd = chartRangeEnd || chartRangeMaxDay;
+  const filteredPostCampaignTrendData = useMemo(
+    () =>
+      getFilteredAverageTrend({
+        meta: null,
+        trend: postCampaignTrendData,
+        trendRange,
+        customStart: effectiveChartRangeStart,
+        customEnd: effectiveChartRangeEnd
+      }),
+    [postCampaignTrendData, trendRange, effectiveChartRangeStart, effectiveChartRangeEnd]
+  );
   const groupedPostCampaignTrendData = useMemo(
     () =>
       getTrendPointsByGranularity({
-        trend: postCampaignTrendData,
+        trend: filteredPostCampaignTrendData,
         granularity: trendGranularity
       }),
-    [postCampaignTrendData, trendGranularity]
+    [filteredPostCampaignTrendData, trendGranularity]
   );
   const proportionTrendData = useMemo(
     () => buildProportionTrendData(groupedPostCampaignTrendData),
@@ -672,24 +896,86 @@ export function PriceTrackingPage({
   const filteredAverageTrend = useMemo(
     () =>
       getTrendPointsByGranularity({
-        trend: getFilteredAverageTrend({ meta, trend, trendRange }),
+        trend: getFilteredAverageTrend({
+          meta,
+          trend,
+          trendRange,
+          customStart: effectiveChartRangeStart,
+          customEnd: effectiveChartRangeEnd
+        }),
         granularity: trendGranularity
       }),
-    [meta, trend, trendRange, trendGranularity]
+    [meta, trend, trendRange, effectiveChartRangeStart, effectiveChartRangeEnd, trendGranularity]
+  );
+  const divisionPriceTrendByGranularity = useMemo(
+    () =>
+      getDivisionPriceTrendByGranularity({
+        trend: getFilteredDivisionPriceTrend({
+          meta,
+          trend: divisionPriceTrend,
+          trendRange,
+          customStart: effectiveChartRangeStart,
+          customEnd: effectiveChartRangeEnd
+        }),
+        granularity: trendGranularity
+      }),
+    [meta, divisionPriceTrend, trendRange, effectiveChartRangeStart, effectiveChartRangeEnd, trendGranularity]
+  );
+  const availableDivisions =
+    dashboardDefaultDivisions.length > 0
+      ? dashboardDefaultDivisions
+      : (meta?.filters?.divisions ?? []);
+  const availableSegments =
+    baseDashboardSegments.length > 0 ? baseDashboardSegments : (meta?.filters?.segments ?? []);
+  const availableChannels =
+    baseDashboardChannels.length > 0 ? baseDashboardChannels : (meta?.filters?.channels ?? []);
+  const fcNamesByDivision =
+    Object.keys(baseDashboardFcNamesByDivision).length > 0
+      ? baseDashboardFcNamesByDivision
+      : (meta?.filters?.fcNamesByDivision ?? {});
+  const availableDiscountTypes =
+    baseDashboardDiscountTypes.length > 0
+      ? baseDashboardDiscountTypes
+      : (meta?.filters?.discountTypes ?? []);
+  const selectedFcDivisions = useMemo(
+    () =>
+      dashboardDefaultDivisions.filter((division) =>
+        (fcNamesByDivision[division] ?? []).some((fcName) => selectedFcNames.includes(fcName))
+      ),
+    [dashboardDefaultDivisions, fcNamesByDivision, selectedFcNames]
+  );
+  const hasExplicitDivisionSelection =
+    selectedDivisions.length > 0 && !areSameValues(selectedDivisions, dashboardDefaultDivisions);
+  const divisionPriceChartDivisions = orderCompanyDivisions(
+    hasExplicitDivisionSelection
+      ? selectedDivisions
+      : selectedFcDivisions.length > 0
+        ? selectedFcDivisions
+        : dashboardDefaultDivisions,
+    dashboardDivision
+  );
+  const expandedDivisionPriceDivisions = useMemo(() => {
+    if (divisionPriceChartDivisions.length !== 1) {
+      return [];
+    }
+
+    return divisionPriceChartDivisions;
+  }, [divisionPriceChartDivisions]);
+  const divisionPriceChart = useMemo(
+    () =>
+      buildDivisionPriceChartData({
+        trend: divisionPriceTrendByGranularity,
+        divisions: divisionPriceChartDivisions,
+        expandedDivisions: expandedDivisionPriceDivisions
+      }),
+    [divisionPriceTrendByGranularity, divisionPriceChartDivisions, expandedDivisionPriceDivisions]
   );
   const availableDays = useMemo(
     () => postCampaignTrendData.map((point) => point.day),
     [postCampaignTrendData]
   );
 
-  const availableDivisions =
-    dashboardDefaultDivisions.length > 0
-      ? dashboardDefaultDivisions
-      : (meta?.filters?.divisions ?? []);
-  const availableSegments = meta?.filters?.segments ?? [];
-  const availableChannels = meta?.filters?.channels ?? [];
-  const fcNamesByDivision = meta?.filters?.fcNamesByDivision ?? {};
-  const availableDiscountTypes = meta?.filters?.discountTypes ?? [];
+  const hasTrendData = postCampaignTrendData.length > 0;
 
   const totalPages = Math.max(1, Math.ceil(projectTotal / PAGE_SIZE));
   const firstProjectIndex = projectTotal === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
@@ -706,7 +992,7 @@ export function PriceTrackingPage({
     search
   });
 
-  if (!error && (metaLoading || !hasLoadedSummary)) {
+  if (!dashboardError && (isBootstrapping || !meta || !summary)) {
     return (
       <PriceTrackingShell
         authUser={authUser}
@@ -720,10 +1006,10 @@ export function PriceTrackingPage({
         hideSidebar={hideSidebar}
         hideUserActions={hideUserActions}
       >
-        <div className="shell">
-          <div className="loadingScreen">
+        <div className={appShellClass}>
+          <div className="flex min-h-[320px] flex-col items-center justify-center rounded-[28px] border border-[var(--border)] bg-[var(--surface)] px-6 py-12 text-center shadow-[0_24px_80px_rgba(2,8,20,0.24)]">
             <strong>กำลังโหลด dashboard...</strong>
-            <span>
+            <span className="mt-2 max-w-md text-sm leading-6 text-[var(--muted-foreground)]">
               {showDashboardSlowNotice
                 ? "ข้อมูลชุดนี้ใช้เวลานานกว่าปกติ ระบบยังโหลดต่ออยู่"
                 : "กำลังเตรียมข้อมูลล่าสุด"}
@@ -734,7 +1020,7 @@ export function PriceTrackingPage({
     );
   }
 
-  if (error || !meta || !summary) {
+  if (dashboardError || !meta || !summary) {
     return (
       <PriceTrackingShell
         authUser={authUser}
@@ -748,7 +1034,11 @@ export function PriceTrackingPage({
         hideSidebar={hideSidebar}
         hideUserActions={hideUserActions}
       >
-        <div className="shell">Cannot load dashboard: {error || "missing data"}</div>
+        <div className={appShellClass}>
+          <div className="rounded-[28px] border border-[var(--alert-error-border)] bg-[var(--alert-error-bg)] px-6 py-5 text-sm font-medium text-[var(--alert-error-text)]">
+            Cannot load dashboard: {dashboardError || "missing data"}
+          </div>
+        </div>
       </PriceTrackingShell>
     );
   }
@@ -769,7 +1059,6 @@ export function PriceTrackingPage({
   const activeCalcContent = activeCalcHelp ? calcHelpContent[activeCalcHelp] : null;
   const sharedFilterMenu = (
       <SharedFilterMenuBar
-      className="topbarSharedFilter"
       selectedBaselineStart={baselineStart}
       selectedBaselineEnd={baselineEnd}
       availableDivisions={availableDivisions}
@@ -786,6 +1075,7 @@ export function PriceTrackingPage({
       onBaselineStartChange={setBaselineStart}
       onBaselineEndChange={setBaselineEnd}
       onResetSharedFilters={clearSharedFilters}
+      onSelectDivision={selectOnlyDivision}
       onToggleDivision={toggleDivision}
       onClearDivisions={clearDivisions}
       onToggleFcName={toggleFcName}
@@ -798,6 +1088,35 @@ export function PriceTrackingPage({
       onClearDiscountTypes={() => setSelectedDiscountTypes([])}
     />
   );
+  const pendingNotificationCount =
+    adminNotificationSummary.pendingRequestCount +
+    (adminNotificationSummary.dataOceanTokenAlert ? 1 : 0);
+  const dataOceanAlertLabel =
+    adminNotificationSummary.dataOceanDaysRemaining !== null &&
+    adminNotificationSummary.dataOceanDaysRemaining <= 0
+      ? "DataOcean Token หมดอายุแล้ว"
+      : adminNotificationSummary.dataOceanDaysRemaining === 1
+        ? "DataOcean Token จะหมดอายุพรุ่งนี้"
+        : adminNotificationSummary.dataOceanDaysRemaining !== null
+          ? `DataOcean Token เหลือ ${adminNotificationSummary.dataOceanDaysRemaining} วัน`
+          : "DataOcean Token ใกล้หมดอายุ";
+  const notificationLabel =
+    pendingNotificationCount > 0
+      ? [
+          adminNotificationSummary.pendingRequestCount > 0
+            ? `มีคำขอสิทธิ์รออนุมัติ ${adminNotificationSummary.pendingRequestCount} รายการ`
+            : null,
+          adminNotificationSummary.dataOceanTokenAlert ? dataOceanAlertLabel : null
+        ]
+          .filter(Boolean)
+          .join(" • ")
+      : "ยังไม่มีคำขอสิทธิ์ใหม่";
+  const openAdminNotifications = () => {
+    const target = adminNotificationSummary.dataOceanTokenAlert ? "data-ocean" : "users";
+    window.sessionStorage.setItem("admin-active-view", target);
+    window.dispatchEvent(new CustomEvent("admin-view-change", { detail: target }));
+    onMenuChange("admin");
+  };
 
   return (
     <PriceTrackingShell
@@ -812,9 +1131,10 @@ export function PriceTrackingPage({
       filterMenu={sharedFilterMenu}
       hideSidebar={hideSidebar}
       hideUserActions={hideUserActions}
+      onAdminNotificationChange={setAdminNotificationSummary}
     >
-      <div className="shell" onClick={() => setActiveHint(null)}>
-        <section id="overview" className="sectionAnchor">
+      <div onClick={() => setActiveHint(null)}>
+        <section id="overview">
           <OverviewSection
             dashboardLabel={APP_MENU_LABELS[activeMenu] ?? `Dashboard ติดตามการขึ้นราคา (${dashboardDivision})`}
             baselineStart={meta.config.baselineStart}
@@ -823,13 +1143,31 @@ export function PriceTrackingPage({
             avgIncreaseLabel={formatNumber(summary.avgIncrease)}
             targetHitShareLabel={`${formatNumber(targetHitShare)}%`}
             summaryDateRange={summaryDateRange}
-            dashboardLoading={dashboardLoading}
+            dashboardLoading={isRefreshingDashboard && !summary}
             showDashboardSlowNotice={showDashboardSlowNotice}
+            themeMode={themeMode}
+            pendingNotificationCount={pendingNotificationCount}
+            notificationLabel={notificationLabel}
+            onToggleTheme={onToggleTheme}
+            onOpenNotifications={openAdminNotifications}
             onOpenCalcHelp={setActiveCalcHelp}
           />
         </section>
 
-        <section id="trends" className="sectionAnchor">
+        {!hasDashboardData || !hasTrendData ? (
+          <div className={appShellClass}>
+            <div className="rounded-[22px] border border-[var(--border-strong)] bg-[var(--surface)] px-5 py-4 text-sm leading-6 text-[var(--muted-foreground)] shadow-[0_18px_40px_var(--shadow-color)]">
+              <strong className="block text-[var(--foreground)]">
+                {!hasDashboardData ? "ยังไม่มี snapshot ข้อมูลในระบบ" : "ยังไม่มีข้อมูลที่ตรงกับตัวกรอง"}
+              </strong>
+              {!hasDashboardData
+                ? "API ตอบกลับสำเร็จแล้ว แต่ backend ยังไม่มี cache/snapshot สำหรับ dashboard ชุดนี้ จึงแสดงค่าเป็นศูนย์ไว้ก่อน"
+                : "ลองปรับช่วง Baseline หรือรีเซ็ตตัวกรอง Division / FC, Segment, Channel และ Discount type"}
+            </div>
+          </div>
+        ) : null}
+
+        <section id="trends">
           <TrendChartsSection
             priceLadderMode={priceLadderMode}
             trendGranularity={trendGranularity}
@@ -838,26 +1176,43 @@ export function PriceTrackingPage({
             proportionTrendData={proportionTrendData}
             discountDropSeries={discountDropSeries}
             filteredAverageTrend={filteredAverageTrend}
+            divisionPriceChartData={divisionPriceChart.data}
+            divisionPriceTrendData={divisionPriceTrend}
+            divisionPriceSeries={divisionPriceChart.divisions}
+            showDivisionPriceChart
+            baselineEnd={meta.config.baselineEnd}
             onSetPriceLadderMode={setPriceLadderMode}
             onSetTrendGranularity={setTrendGranularity}
             onSetTrendRange={setTrendRange}
+            chartRangeStart={effectiveChartRangeStart}
+            chartRangeEnd={effectiveChartRangeEnd}
+            chartRangeMin={chartRangeMinDay}
+            chartRangeMax={chartRangeMaxDay}
+            onSetChartRangeStart={(value) => {
+              setChartRangeStart(value);
+              setTrendRange("custom");
+            }}
+            onSetChartRangeEnd={(value) => {
+              setChartRangeEnd(value);
+              setTrendRange("custom");
+            }}
             onOpenCalcHelp={setActiveCalcHelp}
           />
         </section>
 
-        <section id="project-trend" className="sectionAnchor">
+        <section id="project-trend">
           <ProjectTrendSection
             meta={meta}
             selectedSite={selectedSite}
             selectedTrend={selectedTrend}
             selectedTrendChartData={selectedTrendChartData}
-            selectedTrendLoading={selectedTrendLoading}
+            selectedTrendLoading={isRefreshingSelectedTrend}
             showSelectedTrendSlowNotice={showSelectedTrendSlowNotice}
             onOpenCalcHelp={setActiveCalcHelp}
           />
         </section>
 
-        <section id="projects" className="sectionAnchor">
+        <section id="projects">
           <ProjectsTableSection
             search={search}
             selectedDay={selectedDay}
@@ -874,7 +1229,7 @@ export function PriceTrackingPage({
             selectedSite={selectedSite}
             activeHint={activeHint}
             projectError={projectError}
-            projectLoading={projectLoading}
+            projectLoading={isRefreshingProjects}
             hasLoadedProjects={hasLoadedProjects}
             showProjectSlowNotice={showProjectSlowNotice}
             onOpenCalcHelp={setActiveCalcHelp}

@@ -17,6 +17,7 @@ export async function fetchJson<T>(url: string, options: FetchJsonOptions = {}):
 
   try {
     response = await fetch(url, {
+      credentials: "include",
       signal: requestSignal
     });
   } catch (error) {

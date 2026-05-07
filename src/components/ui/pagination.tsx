@@ -39,8 +39,8 @@ function PaginationLink({ className, isActive, ...props }: PaginationLinkProps) 
       data-slot="pagination-link"
       aria-current={isActive ? "page" : undefined}
       className={cn(
-        "inline-flex min-h-10 min-w-10 items-center justify-center rounded-full border border-[rgba(123,157,214,0.25)] bg-[rgba(7,17,34,0.92)] px-3 text-sm font-medium text-[#dce8ff] transition hover:border-[rgba(128,221,255,0.55)] hover:-translate-y-px disabled:pointer-events-none disabled:opacity-45",
-        isActive && "border-[rgba(128,221,255,0.55)] bg-[rgba(53,98,168,0.85)]",
+        "inline-flex min-h-10 min-w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 text-sm font-medium text-[var(--foreground)] transition hover:border-[var(--border-strong)] hover:-translate-y-px disabled:pointer-events-none disabled:opacity-45",
+        isActive && "border-[var(--border-strong)] bg-[var(--primary-soft)]",
         className
       )}
       {...props}
@@ -71,7 +71,7 @@ function PaginationEllipsis({ className, ...props }: React.ComponentProps<"span"
     <span
       aria-hidden
       data-slot="pagination-ellipsis"
-      className={cn("flex h-10 w-10 items-center justify-center text-[#9fb0d0]", className)}
+      className={cn("flex h-10 w-10 items-center justify-center text-[var(--muted-foreground)]", className)}
       {...props}
     >
       <MoreHorizontal className="size-4" />

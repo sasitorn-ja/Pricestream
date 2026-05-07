@@ -1,4 +1,6 @@
+import { ChevronDown } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { Button } from "../../../../components/ui/button";
 
 type SingleSelectDropdownProps = {
   label: string;
@@ -55,7 +57,7 @@ export function SingleSelectDropdown({
   return (
     <details
       ref={dropdownRef}
-      className="singleSelectDropdown"
+      className="relative min-w-[180px]"
       onToggle={(event) => {
         const currentDropdown = event.currentTarget;
 
@@ -63,42 +65,47 @@ export function SingleSelectDropdown({
           return;
         }
 
-        document
-          .querySelectorAll<HTMLDetailsElement>(".topbarSharedFilter details[open]")
-          .forEach((details) => {
-            if (details !== currentDropdown) {
-              details.open = false;
-            }
-          });
+        document.querySelectorAll<HTMLDetailsElement>("[data-filter-root] details[open]").forEach((details) => {
+          if (details !== currentDropdown) {
+            details.open = false;
+          }
+        });
       }}
     >
-      <summary>
-        <span>{label}</span>
-        <strong>{selectedLabel}</strong>
+      <summary className="flex h-8 list-none cursor-pointer items-center justify-between gap-2 rounded-[16px] border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-left text-[13px] text-[var(--foreground)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-[var(--border-strong)] [&::-webkit-details-marker]:hidden">
+        <span className="truncate text-[var(--muted-foreground)]">{label}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          <strong className="truncate font-semibold text-[var(--foreground)]">{selectedLabel}</strong>
+          <ChevronDown className="size-3.5 text-[var(--muted-foreground)]" />
+        </span>
       </summary>
-      <div className="singleSelectMenu">
-        <button
-          type="button"
-          className={`singleSelectOption ${selectedValue === "" ? "selected" : ""}`}
+      <div className="absolute z-30 mt-2 flex max-h-80 min-w-full flex-col gap-2 overflow-auto rounded-[24px] border border-[var(--border)] bg-[var(--surface-strong)] p-3 shadow-[0_24px_60px_rgba(2,8,20,0.38)]">
+        <Button
+          variant="chip"
+          size="sm"
+          data-active={selectedValue === ""}
+          className="justify-start"
           onClick={() => {
             onSelect("");
             closeDropdown();
           }}
         >
           {fallbackLabel}
-        </button>
+        </Button>
         {options.map((option) => (
-          <button
+          <Button
             key={option.value}
-            type="button"
-            className={`singleSelectOption ${selectedValue === option.value ? "selected" : ""}`}
+            variant="chip"
+            size="sm"
+            data-active={selectedValue === option.value}
+            className="justify-start"
             onClick={() => {
               onSelect(option.value);
               closeDropdown();
             }}
           >
             {option.label}
-          </button>
+          </Button>
         ))}
       </div>
     </details>

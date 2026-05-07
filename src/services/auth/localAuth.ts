@@ -1,3 +1,4 @@
+import { LEGACY_AUTH_TOKEN_STORAGE_KEY } from "../../../shared/appConfig";
 import { type AuthUser } from "./authUser";
 
 export type CompanyCode = "CPAC" | "QMIX";
@@ -25,18 +26,6 @@ export type LocalUserRecord = {
   updatedAt: string;
 };
 
-export type LocalEmailRecord = {
-  id: string;
-  to: string;
-  subject: string;
-  body: string;
-  deliveryStatus: "pending" | "sent" | "failed" | "skipped";
-  deliveryProvider?: "smtp" | "none" | null;
-  deliveryError?: string | null;
-  deliveredAt?: string | null;
-  createdAt: string;
-};
-
 export type EmailDeliveryResult = {
   delivered: boolean;
   provider: "smtp" | "none";
@@ -44,19 +33,59 @@ export type EmailDeliveryResult = {
   reason?: string;
 };
 
+export type DataOceanTokenStatus = {
+  source: "db" | "env" | "missing";
+  maskedToken: string | null;
+  savedAt: string | null;
+  validityDays: number | null;
+  expiresAt: string | null;
+  daysUsed: number | null;
+  daysRemaining: number | null;
+  status: "healthy" | "expiring" | "expired" | "missing" | "invalid";
+  updatedAt: string | null;
+  updatedBy: string | null;
+  message: string;
+};
+
 type ApproveAccessRequestResponse =
   | { user: LocalUserRecord; emailDelivery?: EmailDeliveryResult }
   | LocalUserRecord;
 
+type CreateLocalUserResponse = {
+  user: LocalUserRecord;
+  emailDelivery?: EmailDeliveryResult;
+};
+
 export type AdminState = {
   users: LocalUserRecord[];
   requests: LocalAccessRequest[];
-  outbox: LocalEmailRecord[];
+  dataOceanConfig: DataOceanTokenStatus;
 };
 
 export type AdminNotificationSummary = {
   pendingRequestCount: number;
+  dataOceanTokenAlert: boolean;
+  dataOceanTokenStatus: DataOceanTokenStatus["status"];
+  dataOceanDaysRemaining: number | null;
+  dataOceanExpiresAt: string | null;
 };
+
+export type AuthBootstrapResult = {
+  status: "authenticated" | "anonymous" | "timeout" | "server_error";
+  user?: AuthUser | null;
+  message?: string;
+  source?: "server" | "session-cache";
+};
+
+type AuthSessionResponse =
+  | {
+      authenticated: true;
+      user: AuthUser;
+    }
+  | {
+      authenticated: false;
+      user?: null;
+    };
 
 export const APP_MENU_LABELS: Record<AppMenuKey, string> = {
   "dashboard-cpac": "Dashboard ติดตามการขึ้นราคา (CPAC)",
@@ -64,23 +93,86 @@ export const APP_MENU_LABELS: Record<AppMenuKey, string> = {
   admin: "Admin"
 };
 
-const AUTH_TOKEN_KEY = "pricing-monitor-auth-token";
+class HttpRequestError extends Error {
+  status: number;
 
-function getAuthToken() {
-  return window.localStorage.getItem(AUTH_TOKEN_KEY) ?? "";
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "HttpRequestError";
+    this.status = status;
+  }
 }
 
-async function requestJson<T>(url: string, options: RequestInit = {}) {
-  const token = getAuthToken();
-  const headers = new Headers(options.headers);
-  headers.set("Content-Type", "application/json");
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+const AUTH_BOOTSTRAP_TIMEOUT_MS = 5000;
+const AUTH_REQUEST_TIMEOUT_MS = 30000;
+const AUTH_EMAIL_REQUEST_TIMEOUT_MS = 90000;
+
+type RequestJsonOptions = RequestInit & {
+  timeoutMs?: number;
+};
+const AUTH_SESSION_CACHE_KEY = "cpac-dashboard-auth-session-cache";
+
+function getLegacyAuthToken() {
+  return window.localStorage.getItem(LEGACY_AUTH_TOKEN_STORAGE_KEY) ?? "";
+}
+
+function clearLegacyAuthToken() {
+  window.localStorage.removeItem(LEGACY_AUTH_TOKEN_STORAGE_KEY);
+}
+
+function readCachedAuthUser() {
+  if (typeof window === "undefined") {
+    return null;
   }
 
+  try {
+    const rawValue = window.sessionStorage.getItem(AUTH_SESSION_CACHE_KEY);
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsed = JSON.parse(rawValue) as AuthUser | null;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedAuthUser(user: AuthUser) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.sessionStorage.setItem(AUTH_SESSION_CACHE_KEY, JSON.stringify(user));
+}
+
+function clearCachedAuthUser() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.sessionStorage.removeItem(AUTH_SESSION_CACHE_KEY);
+}
+
+async function requestJson<T>(url: string, options: RequestJsonOptions = {}) {
+  const legacyToken = getLegacyAuthToken();
+  const headers = new Headers(options.headers);
+  const { timeoutMs = AUTH_REQUEST_TIMEOUT_MS, ...fetchOptions } = options;
+  headers.set("Content-Type", "application/json");
+  if (legacyToken) {
+    headers.set("Authorization", `Bearer ${legacyToken}`);
+  }
+
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const requestSignal = fetchOptions.signal
+    ? AbortSignal.any([fetchOptions.signal, timeoutSignal])
+    : timeoutSignal;
+
   const response = await fetch(url, {
-    ...options,
-    headers
+    ...fetchOptions,
+    credentials: "include",
+    headers,
+    signal: requestSignal
   });
 
   if (!response.ok) {
@@ -91,10 +183,14 @@ async function requestJson<T>(url: string, options: RequestInit = {}) {
     } catch {
       // Keep status message.
     }
-    throw new Error(message);
+    throw new HttpRequestError(message, response.status);
   }
 
   return response.json() as Promise<T>;
+}
+
+function isTimeoutError(error: unknown) {
+  return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
 }
 
 function normalizeEmailDeliveryResult(result: unknown): EmailDeliveryResult {
@@ -127,16 +223,6 @@ function normalizeEmailDeliveryResult(result: unknown): EmailDeliveryResult {
   };
 }
 
-function normalizeOutboxEmail(email: LocalEmailRecord): LocalEmailRecord {
-  return {
-    ...email,
-    deliveryStatus: email.deliveryStatus ?? "pending",
-    deliveryProvider: email.deliveryProvider ?? null,
-    deliveryError: email.deliveryError ?? null,
-    deliveredAt: email.deliveredAt ?? null
-  };
-}
-
 export function bootstrapLocalAuth() {
   // Database schema is initialized by the backend on the first auth API request.
 }
@@ -153,36 +239,121 @@ export async function registerAccessRequest(input: {
 }
 
 export async function loginWithEmailPassword(email: string, password: string) {
-  const result = await requestJson<{ token: string; user: AuthUser }>("/api/auth/login", {
+  const user = await requestJson<AuthUser>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password })
   });
-  window.localStorage.setItem(AUTH_TOKEN_KEY, result.token);
-  return result.user;
+  clearLegacyAuthToken();
+  writeCachedAuthUser(user);
+  return user;
 }
 
-export async function getCurrentLocalAuthUser() {
-  if (!getAuthToken()) {
-    return null;
-  }
-
+export async function getCurrentLocalAuthUser(): Promise<AuthBootstrapResult> {
   try {
-    return await requestJson<AuthUser>("/api/auth/me");
-  } catch {
-    clearLocalAuthSession();
-    return null;
+    const response = await requestJson<AuthSessionResponse>("/api/auth/me", {
+      timeoutMs: AUTH_BOOTSTRAP_TIMEOUT_MS
+    });
+    clearLegacyAuthToken();
+
+    if (response.authenticated) {
+      writeCachedAuthUser(response.user);
+      if (import.meta.env.DEV) {
+        console.debug("[auth-bootstrap] authenticated");
+      }
+      return {
+        status: "authenticated",
+        user: response.user,
+        source: "server"
+      };
+    }
+
+    clearCachedAuthUser();
+    if (import.meta.env.DEV) {
+      console.debug("[auth-bootstrap] anonymous");
+    }
+    return {
+      status: "anonymous",
+      user: null,
+      source: "server"
+    };
+  } catch (error) {
+    if (error instanceof HttpRequestError && error.status === 401) {
+      clearLegacyAuthToken();
+      clearCachedAuthUser();
+      if (import.meta.env.DEV) {
+        console.debug("[auth-bootstrap] anonymous (401)");
+      }
+      return {
+        status: "anonymous",
+        user: null,
+        source: "server"
+      };
+    }
+
+    if (error instanceof HttpRequestError && error.status >= 500) {
+      const cachedUser = readCachedAuthUser();
+      if (import.meta.env.DEV) {
+        console.debug("[auth-bootstrap] server_error", error.status, error.message);
+      }
+      if (cachedUser) {
+        return {
+          status: "authenticated",
+          user: cachedUser,
+          source: "session-cache"
+        };
+      }
+      return {
+        status: "anonymous",
+        user: null,
+        source: "server"
+      };
+    }
+
+    if (isTimeoutError(error)) {
+      const cachedUser = readCachedAuthUser();
+      if (import.meta.env.DEV) {
+        console.debug("[auth-bootstrap] timeout");
+      }
+      if (cachedUser) {
+        return {
+          status: "authenticated",
+          user: cachedUser,
+          source: "session-cache"
+        };
+      }
+      return {
+        status: "anonymous",
+        user: null
+      };
+    }
+
+    const cachedUser = readCachedAuthUser();
+    if (import.meta.env.DEV) {
+      console.debug("[auth-bootstrap] server_error", error);
+    }
+    if (cachedUser) {
+      return {
+        status: "authenticated",
+        user: cachedUser,
+        source: "session-cache"
+      };
+    }
+    return {
+      status: "anonymous",
+      user: null,
+      source: "server"
+    };
   }
 }
 
 export async function clearLocalAuthSession() {
-  if (getAuthToken()) {
-    try {
-      await requestJson<{ ok: true }>("/api/auth/logout", { method: "POST" });
-    } catch {
-      // Clear local token even if the server session is already gone.
-    }
+  try {
+    await requestJson<{ ok: true }>("/api/auth/logout", { method: "POST" });
+  } catch {
+    // Clear legacy state even if the server session is already gone.
   }
-  window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  clearLegacyAuthToken();
+  clearCachedAuthUser();
 }
 
 export async function changeLocalPassword(input: {
@@ -196,11 +367,7 @@ export async function changeLocalPassword(input: {
 }
 
 export async function getAdminState() {
-  const state = await requestJson<AdminState>("/api/auth/admin/state");
-  return {
-    ...state,
-    outbox: state.outbox.map(normalizeOutboxEmail)
-  };
+  return requestJson<AdminState>("/api/auth/admin/state");
 }
 
 export async function getAdminNotificationSummary() {
@@ -218,7 +385,8 @@ export async function approveAccessRequest(
     `/api/auth/admin/requests/${requestId}/approve`,
     {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
+      timeoutMs: AUTH_EMAIL_REQUEST_TIMEOUT_MS
     }
   );
 
@@ -235,12 +403,59 @@ export async function approveAccessRequest(
   };
 }
 
+export async function deleteAccessRequest(requestId: string) {
+  return requestJson<{ ok: true; deletedRequestId: string; deletedEmail: string }>(
+    `/api/auth/admin/requests/${requestId}`,
+    {
+      method: "DELETE"
+    }
+  );
+}
+
 export async function updateLocalUser(
   userId: string,
   input: Pick<LocalUserRecord, "role" | "menuPermissions">
 ) {
   return requestJson<LocalUserRecord>(`/api/auth/admin/users/${userId}`, {
     method: "PATCH",
+    body: JSON.stringify(input)
+  });
+}
+
+export async function createLocalUser(input: {
+  email: string;
+  name: string;
+  company: CompanyCode;
+  role: "admin" | "user";
+  menuPermissions: AppMenuKey[];
+}) {
+  const response = await requestJson<CreateLocalUserResponse>("/api/auth/admin/users", {
+    method: "POST",
+    body: JSON.stringify(input),
+    timeoutMs: AUTH_EMAIL_REQUEST_TIMEOUT_MS
+  });
+
+  return {
+    user: response.user,
+    emailDelivery: normalizeEmailDeliveryResult(response.emailDelivery)
+  };
+}
+
+export async function deleteLocalUser(userId: string) {
+  return requestJson<{ ok: true; deletedUserId: string; deletedEmail: string }>(
+    `/api/auth/admin/users/${userId}`,
+    {
+      method: "DELETE"
+    }
+  );
+}
+
+export async function updateDataOceanToken(input: {
+  token: string;
+  validityDays: number;
+}) {
+  return requestJson<DataOceanTokenStatus>("/api/auth/admin/dataocean-token", {
+    method: "PUT",
     body: JSON.stringify(input)
   });
 }

@@ -1,5 +1,16 @@
-import { useEffect, useState } from "react";
-import { Check, KeyRound, Mail, ShieldCheck, Users } from "lucide-react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  Check,
+  Database,
+  Mail,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+  Users
+} from "lucide-react";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
 import {
   Pagination,
   PaginationContent,
@@ -9,15 +20,35 @@ import {
   PaginationNext,
   PaginationPrevious
 } from "../components/ui/pagination";
+import {
+  appShellClass,
+  emptyStateClass,
+  fieldGroupClass,
+  formLabelClass,
+  helperTextClass,
+  sectionClass,
+  selectClass,
+  summaryCardClass,
+  tableBaseClass,
+  tableWrapClass
+} from "../components/ui/styles";
+import { Textarea } from "../components/ui/textarea";
+import { cn } from "../lib/utils";
 import { type AuthUser } from "../services/auth/authUser";
 import {
   APP_MENU_LABELS,
   approveAccessRequest,
+  createLocalUser,
+  type DataOceanTokenStatus,
+  deleteAccessRequest,
+  deleteLocalUser,
   type EmailDeliveryResult,
   getAdminState,
+  updateDataOceanToken,
   updateLocalUser,
   type AdminState,
-  type AppMenuKey
+  type AppMenuKey,
+  type CompanyCode
 } from "../services/auth/localAuth";
 
 type AdminPanelProps = {
@@ -25,20 +56,62 @@ type AdminPanelProps = {
 };
 
 const menuOptions: AppMenuKey[] = ["dashboard-cpac", "dashboard-qmix", "admin"];
-const DEFAULT_ADMIN_EMAIL = "admin@admin.com";
+const DEFAULT_ADMIN_EMAIL = "devcpacadmin@gmail.com";
 const ADMIN_TABLE_PAGE_SIZE = 15;
 const ALL_MENU_OPTIONS: AppMenuKey[] = [...menuOptions];
+const DEFAULT_VALIDITY_DAYS = 360;
+const ADMIN_ACTIVE_VIEW_SESSION_KEY = "admin-active-view";
+const ADMIN_NOTIFICATIONS_REFRESH_EVENT = "admin-notifications-refresh";
+type AdminActiveView = "users" | "data-ocean";
+const EMPTY_DATAOCEAN_STATUS: DataOceanTokenStatus = {
+  source: "missing",
+  maskedToken: null,
+  savedAt: null,
+  validityDays: null,
+  expiresAt: null,
+  daysUsed: null,
+  daysRemaining: null,
+  status: "missing",
+  updatedAt: null,
+  updatedBy: null,
+  message: "ยังไม่มี DataOcean token ในระบบ กรุณาบันทึกจากหน้า Admin"
+};
 
 function toggleMenu(current: AppMenuKey[], menu: AppMenuKey) {
   return current.includes(menu) ? current.filter((item) => item !== menu) : [...current, menu];
 }
 
-function getMenuPermissionsForRole(role: "admin" | "user", current: AppMenuKey[], fallback: AppMenuKey) {
+function getMenuPermissionsForRole(
+  role: "admin" | "user",
+  current: AppMenuKey[],
+  fallback: AppMenuKey
+) {
   if (role === "admin") {
     return ALL_MENU_OPTIONS;
   }
 
   return current.length > 0 ? current : [fallback];
+}
+
+function getDefaultMenuForCompany(company: CompanyCode): AppMenuKey {
+  return company === "QMIX" ? "dashboard-qmix" : "dashboard-cpac";
+}
+
+function isAdminActiveView(value: unknown): value is AdminActiveView {
+  return value === "users" || value === "data-ocean";
+}
+
+function getStoredAdminActiveView(): AdminActiveView {
+  if (typeof window === "undefined") {
+    return "users";
+  }
+
+  const storedView = window.sessionStorage.getItem(ADMIN_ACTIVE_VIEW_SESSION_KEY);
+  return isAdminActiveView(storedView) ? storedView : "users";
+}
+
+function notifyAdminSummaryChanged() {
+  window.dispatchEvent(new CustomEvent(ADMIN_NOTIFICATIONS_REFRESH_EVENT));
 }
 
 function formatAdminDate(value: string) {
@@ -48,37 +121,70 @@ function formatAdminDate(value: string) {
   }).format(new Date(value));
 }
 
-function formatEmailDeliveryMessage(result: EmailDeliveryResult) {
+function formatAdminDateOnly(value: string) {
+  return new Intl.DateTimeFormat("th-TH", {
+    dateStyle: "medium"
+  }).format(new Date(value));
+}
+
+function formatDataOceanSavedAt(value: string, source: DataOceanTokenStatus["source"]) {
+  if (source === "env" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return formatAdminDateOnly(value);
+  }
+
+  return formatAdminDate(value);
+}
+
+function formatDataOceanStatusLabel(status: DataOceanTokenStatus["status"]) {
+  if (status === "healthy") {
+    return "พร้อมใช้งาน";
+  }
+  if (status === "expiring") {
+    return "ใกล้หมดอายุ";
+  }
+  if (status === "expired") {
+    return "หมดอายุแล้ว";
+  }
+  if (status === "invalid") {
+    return "ข้อมูล token ใช้งานไม่ได้";
+  }
+  return "ยังไม่ตั้งค่า";
+}
+
+function formatDataOceanSourceLabel(source: DataOceanTokenStatus["source"]) {
+  if (source === "db") {
+    return "DB กลางของระบบ";
+  }
+  if (source === "env") {
+    return "กำลังใช้ค่าจาก environment";
+  }
+  return "ยังไม่มี token";
+}
+
+function formatMetricDays(value: number | null) {
+  return value === null ? "-" : `${value} วัน`;
+}
+
+function formatCredentialDeliveryMessage(result: EmailDeliveryResult, mode: "approve" | "create") {
+  const prefix = mode === "approve" ? "อนุมัติผู้ใช้แล้ว" : "สร้างบัญชีผู้ใช้แล้ว";
+
   if (result.delivered) {
-    return "อนุมัติแล้วและส่งอีเมลออกสำเร็จ";
+    return `${prefix} และส่งอีเมลรหัสผ่านให้ผู้ใช้แล้ว`;
   }
 
   if (result.queued) {
-    return result.reason ?? "อนุมัติแล้ว ระบบกำลังตรวจสอบการส่งอีเมล";
+    return `${prefix} และระบบกำลังคิวส่งอีเมลรหัสผ่านให้ผู้ใช้`;
   }
 
   if (result.provider === "none") {
-    return "อนุมัติแล้ว แต่ยังไม่มี email provider ระบบเลยเก็บข้อความไว้ใน outbox";
+    return `${prefix} แต่ระบบยังไม่มี email provider`;
   }
 
-  return `อนุมัติแล้ว แต่ส่งอีเมลไม่สำเร็จ${result.reason ? `: ${result.reason}` : ""}`;
+  return `${prefix} แต่ส่งอีเมลไม่สำเร็จ${result.reason ? `: ${result.reason}` : ""}`;
 }
 
 function isPositiveEmailDeliveryResult(result: EmailDeliveryResult) {
   return result.delivered || result.queued;
-}
-
-function formatDeliveryBadge(status: "pending" | "sent" | "failed" | "skipped") {
-  if (status === "sent") {
-    return "ส่งแล้ว";
-  }
-  if (status === "failed") {
-    return "ส่งไม่สำเร็จ";
-  }
-  if (status === "skipped") {
-    return "ยังไม่ได้ส่ง";
-  }
-  return "รอผลการส่ง";
 }
 
 function getAdminPaginationItems(currentPage: number, totalPages: number): Array<number | "ellipsis"> {
@@ -96,26 +202,118 @@ function getAdminPaginationItems(currentPage: number, totalPages: number): Array
     });
 }
 
+function SectionIntro({
+  eyebrow,
+  title,
+  description,
+  right
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div className="space-y-1">
+        <p className="sectionEyebrow text-xs font-semibold uppercase tracking-[0.22em]">{eyebrow}</p>
+        <h2 className="text-xl font-semibold text-[var(--foreground)]">{title}</h2>
+        <p className={helperTextClass}>{description}</p>
+      </div>
+      {right}
+    </div>
+  );
+}
+
+function StatCard({
+  icon,
+  label,
+  value
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <article className={cn(summaryCardClass, "flex items-center gap-3 p-3")}>
+      <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-soft)] text-[var(--foreground)]">
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <span className="block truncate text-xs text-[var(--muted-foreground)]">{label}</span>
+        <strong className="mt-0.5 block truncate text-xl font-semibold text-[var(--foreground)]">{value}</strong>
+      </div>
+    </article>
+  );
+}
+
+function MenuCheckboxes({
+  menus,
+  disabled,
+  onToggle
+}: {
+  menus: AppMenuKey[];
+  disabled: boolean;
+  onToggle: (menu: AppMenuKey) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {menuOptions.map((menu) => (
+        <label
+          key={menu}
+          className={cn(
+            "flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition",
+            menus.includes(menu)
+              ? "border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--foreground)]"
+              : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted-foreground)]",
+            disabled && "cursor-not-allowed opacity-60"
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={menus.includes(menu)}
+            disabled={disabled}
+            onChange={() => onToggle(menu)}
+            className="size-4 accent-[var(--primary)]"
+          />
+          <span>{APP_MENU_LABELS[menu]}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 export function AdminPanel({ authUser }: AdminPanelProps) {
   const [adminState, setAdminState] = useState<AdminState>({
     users: [],
     requests: [],
-    outbox: []
+    dataOceanConfig: EMPTY_DATAOCEAN_STATUS
   });
   const [isLoadingAdminState, setIsLoadingAdminState] = useState(true);
   const [approvalRoleById, setApprovalRoleById] = useState<Record<string, "admin" | "user">>({});
   const [approvalMenusById, setApprovalMenusById] = useState<Record<string, AppMenuKey[]>>({});
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
+  const [tokenInput, setTokenInput] = useState("");
+  const [validityDaysInput, setValidityDaysInput] = useState(String(DEFAULT_VALIDITY_DAYS));
+  const [isSubmittingDataOceanToken, setIsSubmittingDataOceanToken] = useState(false);
+  const [createEmail, setCreateEmail] = useState("");
+  const [createName, setCreateName] = useState("");
+  const [createCompany, setCreateCompany] = useState<CompanyCode>("CPAC");
+  const [createRole, setCreateRole] = useState<"admin" | "user">("user");
+  const [createMenus, setCreateMenus] = useState<AppMenuKey[]>([]);
+  const [isSubmittingCreateUser, setIsSubmittingCreateUser] = useState(false);
   const [currentRequestPage, setCurrentRequestPage] = useState(1);
   const [currentUserPage, setCurrentUserPage] = useState(1);
   const [submittingRequestId, setSubmittingRequestId] = useState("");
+  const [deletingRequestId, setDeletingRequestId] = useState("");
   const [updatingUserId, setUpdatingUserId] = useState("");
-  const [copiedEmailId, setCopiedEmailId] = useState("");
+  const [deletingUserId, setDeletingUserId] = useState("");
+  const [activeAdminView, setActiveAdminView] = useState<AdminActiveView>(() => getStoredAdminActiveView());
 
   const requests = adminState.requests;
   const users = adminState.users;
-  const outbox = adminState.outbox;
+  const dataOceanConfig = adminState.dataOceanConfig;
   const pendingRequests = requests.filter((request) => request.status === "pending");
   const adminCount = users.filter((user) => user.role === "admin").length;
   const requestTotalPages = Math.max(1, Math.ceil(pendingRequests.length / ADMIN_TABLE_PAGE_SIZE));
@@ -131,11 +329,18 @@ export function AdminPanel({ authUser }: AdminPanelProps) {
   const lastUserIndex = Math.min(resolvedUserPage * ADMIN_TABLE_PAGE_SIZE, users.length);
   const visibleUsers = users.slice(firstUserIndex - 1, lastUserIndex);
   const userPaginationItems = getAdminPaginationItems(resolvedUserPage, userTotalPages);
+  const createDefaultMenu = getDefaultMenuForCompany(createCompany);
+  const createSelectedMenus = useMemo(
+    () => getMenuPermissionsForRole(createRole, createMenus, createDefaultMenu),
+    [createDefaultMenu, createMenus, createRole]
+  );
 
   const forceRefresh = async () => {
     setIsLoadingAdminState(true);
     try {
-      setAdminState(await getAdminState());
+      const nextState = await getAdminState();
+      setAdminState(nextState);
+      setValidityDaysInput(String(nextState.dataOceanConfig.validityDays ?? DEFAULT_VALIDITY_DAYS));
     } catch (error) {
       setMessageTone("error");
       setMessage(error instanceof Error ? error.message : "โหลดข้อมูล admin ไม่สำเร็จ");
@@ -148,8 +353,24 @@ export function AdminPanel({ authUser }: AdminPanelProps) {
     void forceRefresh();
   }, []);
 
-  const handleApprove = async (requestId: string, company: "CPAC" | "QMIX") => {
-    const defaultMenu: AppMenuKey = company === "QMIX" ? "dashboard-qmix" : "dashboard-cpac";
+  useEffect(() => {
+    window.sessionStorage.setItem(ADMIN_ACTIVE_VIEW_SESSION_KEY, activeAdminView);
+  }, [activeAdminView]);
+
+  useEffect(() => {
+    function handleAdminViewChange(event: Event) {
+      const nextView = (event as CustomEvent<unknown>).detail;
+      if (isAdminActiveView(nextView)) {
+        setActiveAdminView(nextView);
+      }
+    }
+
+    window.addEventListener("admin-view-change", handleAdminViewChange);
+    return () => window.removeEventListener("admin-view-change", handleAdminViewChange);
+  }, []);
+
+  const handleApprove = async (requestId: string, company: CompanyCode) => {
+    const defaultMenu = getDefaultMenuForCompany(company);
     const selectedRole = approvalRoleById[requestId] ?? "user";
     const menuPermissions = getMenuPermissionsForRole(
       selectedRole,
@@ -164,29 +385,51 @@ export function AdminPanel({ authUser }: AdminPanelProps) {
         menuPermissions
       });
 
-      setAdminState((current) => {
-        const nextUsers = [...current.users];
-        const existingIndex = nextUsers.findIndex((user) => user.id === result.user.id);
-        if (existingIndex >= 0) {
-          nextUsers[existingIndex] = result.user;
-        } else {
-          nextUsers.push(result.user);
-        }
-
-        return {
-          ...current,
-          users: nextUsers,
-          requests: current.requests.filter((request) => request.id !== requestId)
-        };
-      });
+      setAdminState((current) => ({
+        ...current,
+        users: current.users.some((user) => user.id === result.user.id)
+          ? current.users.map((user) => (user.id === result.user.id ? result.user : user))
+          : [...current.users, result.user],
+        requests: current.requests.filter((request) => request.id !== requestId)
+      }));
       setMessageTone(isPositiveEmailDeliveryResult(result.emailDelivery) ? "success" : "error");
-      setMessage(formatEmailDeliveryMessage(result.emailDelivery));
-      void forceRefresh();
+      setMessage(formatCredentialDeliveryMessage(result.emailDelivery, "approve"));
+      notifyAdminSummaryChanged();
+      await forceRefresh();
     } catch (error) {
       setMessageTone("error");
       setMessage(error instanceof Error ? error.message : "อนุมัติผู้ใช้งานไม่สำเร็จ");
     } finally {
       setSubmittingRequestId("");
+    }
+  };
+
+  const handleDeleteRequest = async (requestId: string, email: string) => {
+    if (deletingRequestId === requestId || submittingRequestId === requestId) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(`ยืนยันการลบคำขอของ ${email}?`);
+    if (!shouldDelete) {
+      return;
+    }
+
+    setDeletingRequestId(requestId);
+    try {
+      await deleteAccessRequest(requestId);
+      setAdminState((current) => ({
+        ...current,
+        requests: current.requests.filter((request) => request.id !== requestId)
+      }));
+      setMessageTone("success");
+      setMessage(`ลบคำขอของ ${email} แล้ว`);
+      notifyAdminSummaryChanged();
+      await forceRefresh();
+    } catch (error) {
+      setMessageTone("error");
+      setMessage(error instanceof Error ? error.message : "ลบคำขอไม่สำเร็จ");
+    } finally {
+      setDeletingRequestId("");
     }
   };
 
@@ -242,302 +485,647 @@ export function AdminPanel({ authUser }: AdminPanelProps) {
     }
   };
 
-  const handleCopyEmailBody = async (emailId: string, body: string) => {
+  const handleDeleteUser = async (userId: string, email: string) => {
+    if (deletingUserId === userId) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(`ยืนยันการลบผู้ใช้ ${email} ออกจากระบบ?`);
+    if (!shouldDelete) {
+      return;
+    }
+
+    setDeletingUserId(userId);
     try {
-      await navigator.clipboard.writeText(body);
-      setCopiedEmailId(emailId);
+      await deleteLocalUser(userId);
+      setAdminState((current) => ({
+        ...current,
+        users: current.users.filter((user) => user.id !== userId),
+        requests: current.requests.filter((request) => request.email !== email)
+      }));
       setMessageTone("success");
-      setMessage("คัดลอกข้อความอีเมลพร้อมรหัสผ่านแล้ว ส่งต่อให้ผู้ใช้งานได้เลย");
-      window.setTimeout(() => {
-        setCopiedEmailId((current) => (current === emailId ? "" : current));
-      }, 2500);
-    } catch {
+      setMessage(`ลบผู้ใช้ ${email} ออกจากระบบแล้ว`);
+      void forceRefresh();
+    } catch (error) {
       setMessageTone("error");
-      setMessage("คัดลอกข้อความอีเมลไม่สำเร็จ ลองคัดลอกจาก outbox ด้วยตัวเองอีกครั้ง");
+      setMessage(error instanceof Error ? error.message : "ลบผู้ใช้ไม่สำเร็จ");
+    } finally {
+      setDeletingUserId("");
     }
   };
 
-  if (authUser.role !== "admin") {
+  const handleDataOceanTokenSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isSubmittingDataOceanToken) {
+      return;
+    }
+
+    const nextValidityDays = Number(validityDaysInput);
+    setIsSubmittingDataOceanToken(true);
+    try {
+      const nextStatus = await updateDataOceanToken({
+        token: tokenInput,
+        validityDays: nextValidityDays
+      });
+      setAdminState((current) => ({
+        ...current,
+        dataOceanConfig: nextStatus
+      }));
+      setValidityDaysInput(String(nextStatus.validityDays ?? DEFAULT_VALIDITY_DAYS));
+      setTokenInput("");
+      setMessageTone("success");
+      setMessage("บันทึก DataOcean token ใหม่แล้ว");
+      void forceRefresh();
+    } catch (error) {
+      setMessageTone("error");
+      setMessage(error instanceof Error ? error.message : "บันทึก token ไม่สำเร็จ");
+    } finally {
+      setIsSubmittingDataOceanToken(false);
+    }
+  };
+
+  const handleCreateUser = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isSubmittingCreateUser) {
+      return;
+    }
+
+    setIsSubmittingCreateUser(true);
+    try {
+      const result = await createLocalUser({
+        email: createEmail.trim().toLowerCase(),
+        name: createName.trim(),
+        company: createCompany,
+        role: createRole,
+        menuPermissions: getMenuPermissionsForRole(createRole, createMenus, createDefaultMenu)
+      });
+      setAdminState((current) => ({
+        ...current,
+        users: current.users.some((user) => user.id === result.user.id)
+          ? current.users.map((user) => (user.id === result.user.id ? result.user : user))
+          : [...current.users, result.user]
+      }));
+      setCreateEmail("");
+      setCreateName("");
+      setCreateRole("user");
+      setCreateCompany("CPAC");
+      setCreateMenus([]);
+      setMessageTone(isPositiveEmailDeliveryResult(result.emailDelivery) ? "success" : "error");
+      setMessage(formatCredentialDeliveryMessage(result.emailDelivery, "create"));
+      notifyAdminSummaryChanged();
+      void forceRefresh();
+    } catch (error) {
+      setMessageTone("error");
+      setMessage(error instanceof Error ? error.message : "สร้างบัญชีไม่สำเร็จ");
+    } finally {
+      setIsSubmittingCreateUser(false);
+    }
+  };
+
+  const messageClass =
+    messageTone === "error"
+      ? "border-[var(--alert-error-border)] bg-[var(--alert-error-bg)] text-[var(--alert-error-text)]"
+      : "border-[var(--alert-success-border)] bg-[var(--alert-success-bg)] text-[var(--alert-success-text)]";
+  const dataOceanStatusVariant =
+    dataOceanConfig.status === "healthy"
+      ? "success"
+      : dataOceanConfig.status === "expiring"
+        ? "warning"
+        : dataOceanConfig.status === "expired" || dataOceanConfig.status === "invalid"
+          ? "destructive"
+          : "outline";
+
+  if (isLoadingAdminState && users.length === 0 && requests.length === 0) {
     return (
-      <main className="shell">
-        <section className="panel adminPanel">
-          <h1>Admin</h1>
-          <p>บัญชีนี้ไม่มีสิทธิ์เข้าหน้า admin</p>
+      <div className={cn(appShellClass, "adminControl")}>
+        <section className={sectionClass}>
+          <div className={cn(emptyStateClass, "min-h-[300px]")}>
+            <div className="size-12 animate-spin rounded-full border-4 border-[var(--border)] border-t-[var(--primary)]" />
+            <strong className="mt-4 text-lg text-[var(--foreground)]">กำลังโหลดข้อมูลจากฐานข้อมูล...</strong>
+            <span className="mt-2 text-sm text-[var(--muted-foreground)]">ระบบกำลังเตรียมหน้าจัดการผู้ใช้และสิทธิ์</span>
+          </div>
         </section>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="shell adminShell">
-      <section className="panel adminPanel">
-        <div className="adminHeader">
-          <div>
-            <p className="eyebrow">Admin</p>
-            <h1>อนุมัติผู้ใช้งานและกำหนดเมนู</h1>
-            <p>ตรวจคำขอ สร้างรหัสผ่านให้ผู้ใช้ และกำหนดสิทธิ์เมนูของแต่ละบัญชี</p>
-          </div>
-          <span>{pendingRequests.length} คำขอรออนุมัติ</span>
+    <div className={cn(appShellClass, "adminControl")}>
+      <section className={sectionClass}>
+        <SectionIntro
+          eyebrow="CPAC Dashboard"
+          title="Admin Control Center"
+          description={`ดูแลระบบในฐานะ ${authUser.name} จัดการ token, สิทธิ์ผู้ใช้ และคำขอเข้าใช้งานจากหน้าเดียว`}
+          right={
+            <Badge variant="outline" className="self-start">
+              {pendingRequests.length} คำขอรออนุมัติ
+            </Badge>
+          }
+        />
+
+        {message ? <div className={cn("rounded-2xl border px-4 py-3 text-sm", messageClass)}>{message}</div> : null}
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            variant={activeAdminView === "users" ? "default" : "outline"}
+            size="sm"
+            className="rounded-full"
+            onClick={() => setActiveAdminView("users")}
+          >
+            <Users className="size-4" />
+            ผู้ใช้และคำขอ
+          </Button>
+          <Button
+            variant={activeAdminView === "data-ocean" ? "default" : "outline"}
+            size="sm"
+            className="rounded-full"
+            onClick={() => setActiveAdminView("data-ocean")}
+          >
+            <Database className="size-4" />
+            DataOcean Token
+          </Button>
         </div>
-        {message ? (
-          <p className={`adminMessage ${messageTone === "error" ? "error" : "success"}`}>{message}</p>
+
+        {activeAdminView === "users" ? (
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <StatCard icon={<Mail className="size-5" />} label="คำขอรออนุมัติ" value={pendingRequests.length} />
+            <StatCard icon={<Users className="size-5" />} label="ผู้ใช้งานทั้งหมด" value={users.length} />
+            <StatCard icon={<ShieldCheck className="size-5" />} label="ผู้ดูแลระบบ" value={adminCount} />
+          </div>
         ) : null}
 
-        <div className="adminStats">
-          <article>
-            <Mail />
-            <span>คำขอรออนุมัติ</span>
-            <strong>{pendingRequests.length}</strong>
-          </article>
-          <article>
-            <Users />
-            <span>ผู้ใช้งานทั้งหมด</span>
-            <strong>{users.length}</strong>
-          </article>
-          <article>
-            <ShieldCheck />
-            <span>Admin</span>
-            <strong>{adminCount}</strong>
-          </article>
-          <article>
-            <KeyRound />
-            <span>Email outbox</span>
-            <strong>{outbox.length}</strong>
-          </article>
-        </div>
-
-        {isLoadingAdminState ? <p className="tableRefreshNotice">กำลังโหลดข้อมูลจากฐานข้อมูล...</p> : null}
-
-        <div className="adminRequestsLayout">
-          <section className="adminSection">
-            <div className="adminSectionHeader">
-              <div>
-                <h2>คำขอเข้าใช้งาน</h2>
-                <p>เลือก role และเมนูที่เห็นได้ จากนั้นระบบจะสร้างรหัสผ่านและส่งให้ user อัตโนมัติ</p>
-              </div>
-            </div>
-            {pendingRequests.length === 0 ? (
-              <div className="adminEmptyState">
-                <Check />
-                <strong>ไม่มีคำขอใหม่</strong>
-                <span>เมื่อมีคนขอสิทธิ์เข้าใช้งาน รายการจะมาอยู่ตรงนี้</span>
-              </div>
-            ) : null}
-            {visibleRequests.map((request) => {
-              const selectedRole = approvalRoleById[request.id] ?? "user";
-              const defaultMenu: AppMenuKey =
-                request.company === "QMIX" ? "dashboard-qmix" : "dashboard-cpac";
-              const selectedMenus = getMenuPermissionsForRole(
-                selectedRole,
-                approvalMenusById[request.id] ?? [],
-                defaultMenu
-              );
-
-              return (
-                <div key={request.id} className="adminRequestCard">
-                  <div className="adminCardTop">
-                    <div className="adminAvatar">{request.company === "QMIX" ? "Q" : "C"}</div>
-                    <div className="adminCardIdentity">
-                      <strong>{request.name}</strong>
-                      <span>{request.email}</span>
-                      <small>ส่งคำขอ {formatAdminDate(request.createdAt)}</small>
-                    </div>
-                    <span className="adminCompanyPill">{request.company}</span>
-                  </div>
-
-                  <div className="adminNoticeBox">
-                    ระบบจะสร้างรหัสผ่านและส่งให้ <strong>{request.email}</strong> หลังจากอนุมัติ
-                  </div>
-
-                  <div className="adminFormGrid">
-                    <label>
-                      Role
-                      <select
-                        value={selectedRole}
-                        disabled={submittingRequestId === request.id}
-                        onChange={(event) =>
-                          setApprovalRoleById((current) => {
-                            const nextRole = event.target.value as "admin" | "user";
-                            setApprovalMenusById((menus) => ({
-                              ...menus,
-                              [request.id]: getMenuPermissionsForRole(
-                                nextRole,
-                                menus[request.id] ?? [],
-                                defaultMenu
-                              )
-                            }));
-
-                            return {
-                              ...current,
-                              [request.id]: nextRole
-                            };
-                          })
-                        }
-                      >
-                        <option value="user">User</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                    </label>
-                  </div>
-
-                  <div className="adminMenuChecks adminPermissionChips" aria-label="เมนูที่เห็นได้">
-                    {menuOptions.map((menu) => (
-                      <label key={menu}>
-                        <input
-                          type="checkbox"
-                          checked={selectedMenus.includes(menu)}
-                          disabled={submittingRequestId === request.id || selectedRole === "admin"}
-                          onChange={() =>
-                            setApprovalMenusById((current) => ({
-                              ...current,
-                              [request.id]: toggleMenu(selectedMenus, menu)
-                            }))
-                          }
-                        />
-                        <span>{APP_MENU_LABELS[menu]}</span>
-                      </label>
-                    ))}
-                  </div>
-
-                  <div className="adminCardActions">
-                    <button
-                      type="button"
-                      className="authLoginButton adminApproveButton"
-                      disabled={submittingRequestId === request.id}
-                      onClick={() => void handleApprove(request.id, request.company)}
-                    >
-                      {submittingRequestId === request.id ? "กำลังอนุมัติ..." : "อนุมัติและส่งอีเมล"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-            {pendingRequests.length > ADMIN_TABLE_PAGE_SIZE ? (
-              <div className="adminUserPagination paginationBar">
-                <span className="paginationSummary">
-                  แสดง {firstRequestIndex}-{lastRequestIndex} จาก {pendingRequests.length} คำขอ
-                </span>
-                <Pagination className="mx-0 w-auto justify-end">
-                  <PaginationContent>
-                    <PaginationItem>
-                      <PaginationPrevious
-                        type="button"
-                        disabled={resolvedRequestPage === 1}
-                        onClick={() => setCurrentRequestPage((page) => Math.max(1, page - 1))}
-                      />
-                    </PaginationItem>
-                    {requestPaginationItems.map((item, index) => (
-                      <PaginationItem key={typeof item === "number" ? item : `request-ellipsis-${index}`}>
-                        {item === "ellipsis" ? (
-                          <PaginationEllipsis />
-                        ) : (
-                          <PaginationLink
-                            type="button"
-                            isActive={resolvedRequestPage === item}
-                            onClick={() => setCurrentRequestPage(item)}
-                          >
-                            {item}
-                          </PaginationLink>
-                        )}
-                      </PaginationItem>
-                    ))}
-                    <PaginationItem>
-                      <PaginationNext
-                        type="button"
-                        disabled={resolvedRequestPage === requestTotalPages}
-                        onClick={() => setCurrentRequestPage((page) => Math.min(requestTotalPages, page + 1))}
-                      />
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
-              </div>
-            ) : null}
-          </section>
-        </div>
+        {isLoadingAdminState ? (
+          <p className="mt-4 text-sm text-[var(--muted-foreground)]">กำลังโหลดข้อมูลจากฐานข้อมูล...</p>
+        ) : null}
       </section>
 
-      <section className="panel adminPanel">
-        <div className="adminHeader">
-          <div>
-            <p className="eyebrow">Users</p>
-            <h2>ผู้ใช้งานทั้งหมด</h2>
-            <p>แก้ role และเมนูที่ user เห็นได้ทันทีจากตารางนี้</p>
+      {activeAdminView === "data-ocean" ? (
+      <section className={sectionClass}>
+        <SectionIntro
+          eyebrow="ตั้งค่าระบบ"
+          title="DataOcean Token"
+          description="จัดการ token กลางสำหรับทุกคนในระบบ พร้อมติดตามอายุการใช้งานและวันหมดอายุ"
+          right={
+            <Badge variant={dataOceanStatusVariant} className="self-start">
+              {formatDataOceanStatusLabel(dataOceanConfig.status)}
+            </Badge>
+          }
+        />
+
+        <div className="mb-4 rounded-[18px] border border-[var(--border)] bg-[var(--surface-muted)] p-3">
+          <div className="flex items-start gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-soft)]">
+              <Database className="size-5 text-[var(--foreground)]" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-[var(--foreground)]">{dataOceanConfig.message}</p>
+              <p className="text-sm text-[var(--muted-foreground)]">
+                แหล่งข้อมูลที่กำลังใช้งาน: {formatDataOceanSourceLabel(dataOceanConfig.source)}
+              </p>
+            </div>
           </div>
-          <span>{users.length} users</span>
         </div>
 
-        <div className="adminUserTableWrap">
-          <table className="adminUserTable">
-            <thead>
-              <tr>
-                <th>User</th>
-                <th>บริษัท</th>
-                <th>Role</th>
-                <th>เมนูที่เห็นได้</th>
-                <th>อัปเดตล่าสุด</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleUsers.map((user) => (
-                <tr key={user.id}>
-                  <td>
-                    <div className="adminTableUser">
-                      <div className="adminAvatar">{user.company === "QMIX" ? "Q" : "C"}</div>
-                      <div className="adminCardIdentity">
-                        <strong>{user.name}</strong>
-                        <span>{user.email}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <span className="adminCompanyPill">{user.company}</span>
-                  </td>
-                  <td>
-                    <select
-                      value={user.role}
-                            disabled={
-                              user.id === "admin-local" ||
-                              user.email === DEFAULT_ADMIN_EMAIL ||
-                              updatingUserId === user.id
-                            }
-                      onChange={(event) =>
-                        handleUserRoleChange(user.id, event.target.value as "admin" | "user")
-                      }
-                    >
-                      <option value="user">User</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  </td>
-                  <td>
-                    <div className="adminMenuChecks adminPermissionChips compact tableChips">
-                      {menuOptions.map((menu) => (
-                        <label key={menu}>
-                          <input
-                            type="checkbox"
-                            checked={user.role === "admin" ? ALL_MENU_OPTIONS.includes(menu) : user.menuPermissions.includes(menu)}
-                            disabled={
-                              user.id === "admin-local" ||
-                              user.email === DEFAULT_ADMIN_EMAIL ||
-                              updatingUserId === user.id ||
-                              user.role === "admin"
-                            }
-                            onChange={() => handleUserMenuToggle(user.id, menu)}
-                          />
-                          <span>{APP_MENU_LABELS[menu]}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </td>
-                  <td>{formatAdminDate(user.updatedAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="grid gap-3 md:grid-cols-3 2xl:grid-cols-6">
+          <article className={cn(summaryCardClass, "p-3")}>
+            <span className="text-sm text-[var(--muted-foreground)]">Token ปัจจุบัน</span>
+            <strong className="mt-1 block text-base font-semibold text-[var(--foreground)]">
+              {dataOceanConfig.maskedToken ?? "-"}
+            </strong>
+          </article>
+          <article className={cn(summaryCardClass, "p-3")}>
+            <span className="text-sm text-[var(--muted-foreground)]">เริ่มใช้งานล่าสุด</span>
+            <strong className="mt-1 block text-base font-semibold text-[var(--foreground)]">
+              {dataOceanConfig.savedAt
+                ? formatDataOceanSavedAt(dataOceanConfig.savedAt, dataOceanConfig.source)
+                : "-"}
+            </strong>
+          </article>
+          <article className={cn(summaryCardClass, "p-3")}>
+            <span className="text-sm text-[var(--muted-foreground)]">วันหมดอายุ</span>
+            <strong className="mt-1 block text-base font-semibold text-[var(--foreground)]">
+              {dataOceanConfig.expiresAt ? formatAdminDateOnly(dataOceanConfig.expiresAt) : "-"}
+            </strong>
+          </article>
+          <article className={cn(summaryCardClass, "p-3")}>
+            <span className="text-sm text-[var(--muted-foreground)]">ใช้ไปแล้ว</span>
+            <strong className="mt-1 block text-base font-semibold text-[var(--foreground)]">
+              {formatMetricDays(dataOceanConfig.daysUsed)}
+            </strong>
+          </article>
+          <article className={cn(summaryCardClass, "p-3")}>
+            <span className="text-sm text-[var(--muted-foreground)]">วันคงเหลือ</span>
+            <strong className="mt-1 block text-base font-semibold text-[var(--foreground)]">
+              {formatMetricDays(dataOceanConfig.daysRemaining)}
+            </strong>
+          </article>
+          <article className={cn(summaryCardClass, "p-3")}>
+            <span className="text-sm text-[var(--muted-foreground)]">แก้ล่าสุดโดย</span>
+            <strong className="mt-1 block text-base font-semibold text-[var(--foreground)]">
+              {dataOceanConfig.updatedBy ?? "-"}
+            </strong>
+          </article>
         </div>
+
+        <form className="mt-4 space-y-3" onSubmit={handleDataOceanTokenSubmit}>
+          <label className={fieldGroupClass}>
+            <span className={formLabelClass}>DataOcean token ใหม่</span>
+            <Textarea
+              value={tokenInput}
+              disabled={isSubmittingDataOceanToken}
+              onChange={(event) => setTokenInput(event.target.value)}
+              placeholder="วาง DataOcean token ที่ต้องการใช้กับทุกคนในระบบ"
+              rows={2}
+              required
+            />
+          </label>
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,14rem)_1fr]">
+            <label className={fieldGroupClass}>
+              <span className={formLabelClass}>อายุ token (วัน)</span>
+              <Input
+                type="number"
+                min={1}
+                value={validityDaysInput}
+                disabled={isSubmittingDataOceanToken}
+                onChange={(event) => setValidityDaysInput(event.target.value)}
+                required
+              />
+            </label>
+
+            <div className="flex flex-col gap-3 rounded-[18px] border border-[var(--border)] bg-[var(--surface-muted)] p-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm leading-6 text-[var(--muted-foreground)]">
+                ระบบจะบันทึกวันเริ่มใช้ token ให้เองตอนกดบันทึก ไม่ต้องกรอกวันเอง
+              </p>
+              <Button
+                variant="outline"
+                className="shrink-0"
+                disabled={isLoadingAdminState || isSubmittingDataOceanToken}
+                onClick={() => void forceRefresh()}
+              >
+                <RefreshCw className="size-4" />
+                รีเฟรชสถานะ
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button type="submit" disabled={isSubmittingDataOceanToken}>
+              {isSubmittingDataOceanToken ? "กำลังบันทึก token..." : "บันทึก token"}
+            </Button>
+          </div>
+        </form>
+      </section>
+      ) : null}
+
+      {activeAdminView === "users" ? (
+      <>
+      <section className={sectionClass}>
+        <SectionIntro
+          eyebrow="สร้างบัญชีใหม่"
+          title="สร้างบัญชีผู้ใช้ใหม่"
+          description="สร้างบัญชีได้ทันทีจากหน้า Admin โดยไม่ต้องรอคำขอสิทธิ์ก่อน"
+        />
+
+        <form className="space-y-3" onSubmit={handleCreateUser}>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label className={fieldGroupClass}>
+              <span className={formLabelClass}>อีเมลผู้ใช้</span>
+              <Input
+                type="email"
+                value={createEmail}
+                disabled={isSubmittingCreateUser}
+                onChange={(event) => setCreateEmail(event.target.value)}
+                placeholder="your.email@scg.com"
+                autoComplete="email"
+                required
+              />
+            </label>
+            <label className={fieldGroupClass}>
+              <span className={formLabelClass}>ชื่อผู้ใช้งาน</span>
+              <Input
+                value={createName}
+                disabled={isSubmittingCreateUser}
+                onChange={(event) => setCreateName(event.target.value)}
+                placeholder="ชื่อผู้ใช้"
+                autoComplete="name"
+                required
+              />
+            </label>
+            <label className={fieldGroupClass}>
+              <span className={formLabelClass}>บริษัท</span>
+              <select
+                value={createCompany}
+                disabled={isSubmittingCreateUser}
+                onChange={(event) => setCreateCompany(event.target.value as CompanyCode)}
+                className={selectClass}
+              >
+                <option value="CPAC">CPAC</option>
+                <option value="QMIX">QMIX</option>
+              </select>
+            </label>
+            <label className={fieldGroupClass}>
+              <span className={formLabelClass}>สิทธิ์ผู้ใช้</span>
+              <select
+                value={createRole}
+                disabled={isSubmittingCreateUser}
+                onChange={(event) => setCreateRole(event.target.value as "admin" | "user")}
+                className={selectClass}
+              >
+                <option value="user">ผู้ใช้งาน</option>
+                <option value="admin">ผู้ดูแลระบบ</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="rounded-[18px] border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-sm leading-6 text-[var(--muted-foreground)]">
+            ถ้าเป็นการใช้งานครั้งแรก ระบบจะสร้างรหัสผ่านชั่วคราวและส่งให้ทางอีเมลที่ระบุทันที
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-[var(--foreground)]">เมนูที่เห็นได้หลังสร้างบัญชี</p>
+            <MenuCheckboxes
+              menus={createSelectedMenus}
+              disabled={isSubmittingCreateUser || createRole === "admin"}
+              onToggle={(menu) => setCreateMenus((current) => toggleMenu(current, menu))}
+            />
+          </div>
+
+          <div className="flex justify-end">
+            <Button type="submit" disabled={isSubmittingCreateUser}>
+              {isSubmittingCreateUser ? "กำลังสร้างบัญชี..." : "สร้างบัญชี"}
+            </Button>
+          </div>
+        </form>
+      </section>
+
+      <section className={sectionClass}>
+        <SectionIntro
+          eyebrow="คำขอเข้าใช้งาน"
+          title="คำขอเข้าใช้งาน"
+          description="รายการผู้ใช้ใหม่ที่ส่งคำขอเข้ามาและรอให้ผู้ดูแลอนุมัติ"
+        />
+
+        <div className="space-y-4">
+          {pendingRequests.length === 0 ? (
+            <div className={cn(emptyStateClass, "min-h-[10rem] py-6")}>
+              <Check className="size-8 text-emerald-300" />
+              <strong className="mt-3 text-base text-[var(--foreground)]">ไม่มีคำขอใหม่</strong>
+              <span className="mt-1 text-sm text-[var(--muted-foreground)]">
+                เมื่อมีคนขอสิทธิ์เข้าใช้งาน รายการจะมาอยู่ตรงนี้
+              </span>
+            </div>
+          ) : null}
+
+          {visibleRequests.map((request) => {
+            const selectedRole = approvalRoleById[request.id] ?? "user";
+            const defaultMenu = getDefaultMenuForCompany(request.company);
+            const selectedMenus = getMenuPermissionsForRole(
+              selectedRole,
+              approvalMenusById[request.id] ?? [],
+              defaultMenu
+            );
+
+            return (
+              <article
+                key={request.id}
+                className="rounded-[18px] border border-[var(--border)] bg-[var(--surface-muted)] p-3"
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex items-start gap-4">
+                    <div className="flex size-12 items-center justify-center rounded-2xl bg-[var(--primary-soft)] font-semibold text-[var(--foreground)]">
+                      {request.company === "QMIX" ? "Q" : "C"}
+                    </div>
+                    <div className="space-y-1">
+                      <strong className="block text-lg text-[var(--foreground)]">{request.name}</strong>
+                      <span className="block text-sm text-[var(--muted-foreground)]">{request.email}</span>
+                      <small className="block text-xs text-[var(--muted-foreground)]">
+                        ส่งคำขอ {formatAdminDate(request.createdAt)}
+                      </small>
+                    </div>
+                  </div>
+                  <Badge variant="secondary" className="self-start">
+                    {request.company}
+                  </Badge>
+                </div>
+
+                <div className="mt-3 rounded-[16px] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--muted-foreground)]">
+                  ระบบจะสร้างรหัสผ่านชั่วคราวและส่งไปที่ <strong className="text-[var(--foreground)]">{request.email}</strong> หลังจากอนุมัติ
+                </div>
+
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <label className={fieldGroupClass}>
+                    <span className={formLabelClass}>สิทธิ์ผู้ใช้</span>
+                    <select
+                      value={selectedRole}
+                      disabled={submittingRequestId === request.id || deletingRequestId === request.id}
+                      onChange={(event) =>
+                        setApprovalRoleById((current) => {
+                          const nextRole = event.target.value as "admin" | "user";
+                          setApprovalMenusById((menus) => ({
+                            ...menus,
+                            [request.id]: getMenuPermissionsForRole(
+                              nextRole,
+                              menus[request.id] ?? [],
+                              defaultMenu
+                            )
+                          }));
+                          return {
+                            ...current,
+                            [request.id]: nextRole
+                          };
+                        })
+                      }
+                      className={selectClass}
+                    >
+                      <option value="user">ผู้ใช้งาน</option>
+                      <option value="admin">ผู้ดูแลระบบ</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  <p className="text-sm font-medium text-[var(--foreground)]">เมนูที่เห็นได้</p>
+                  <MenuCheckboxes
+                    menus={selectedMenus}
+                    disabled={
+                      submittingRequestId === request.id ||
+                      deletingRequestId === request.id ||
+                      selectedRole === "admin"
+                    }
+                    onToggle={(menu) =>
+                      setApprovalMenusById((current) => ({
+                        ...current,
+                        [request.id]: toggleMenu(current[request.id] ?? [], menu)
+                      }))
+                    }
+                  />
+                </div>
+
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <Button
+                    variant="destructive"
+                    disabled={submittingRequestId === request.id || deletingRequestId === request.id}
+                    onClick={() => void handleDeleteRequest(request.id, request.email)}
+                  >
+                    <Trash2 className="size-4" />
+                    {deletingRequestId === request.id ? "กำลังลบ..." : "ลบคำขอ"}
+                  </Button>
+                  <Button
+                    disabled={submittingRequestId === request.id || deletingRequestId === request.id}
+                    onClick={() => void handleApprove(request.id, request.company)}
+                  >
+                    {submittingRequestId === request.id ? "กำลังอนุมัติ..." : "อนุมัติและส่งรหัสผ่าน"}
+                  </Button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+
+        {pendingRequests.length > ADMIN_TABLE_PAGE_SIZE ? (
+          <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <span className="text-sm text-[var(--muted-foreground)]">
+              แสดง {firstRequestIndex}-{lastRequestIndex} จาก {pendingRequests.length} คำขอ
+            </span>
+            <Pagination className="mx-0 w-auto justify-end">
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    type="button"
+                    disabled={resolvedRequestPage === 1}
+                    onClick={() => setCurrentRequestPage((page) => Math.max(1, page - 1))}
+                  />
+                </PaginationItem>
+                {requestPaginationItems.map((item, index) => (
+                  <PaginationItem key={typeof item === "number" ? item : `request-ellipsis-${index}`}>
+                    {item === "ellipsis" ? (
+                      <PaginationEllipsis />
+                    ) : (
+                      <PaginationLink
+                        type="button"
+                        isActive={resolvedRequestPage === item}
+                        onClick={() => setCurrentRequestPage(item)}
+                      >
+                        {item}
+                      </PaginationLink>
+                    )}
+                  </PaginationItem>
+                ))}
+                <PaginationItem>
+                  <PaginationNext
+                    type="button"
+                    disabled={resolvedRequestPage === requestTotalPages}
+                    onClick={() => setCurrentRequestPage((page) => Math.min(requestTotalPages, page + 1))}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          </div>
+        ) : null}
+      </section>
+
+      <section className={sectionClass}>
+        <SectionIntro
+          eyebrow="รายชื่อผู้ใช้งาน"
+          title="จัดการสิทธิ์ผู้ใช้"
+          description="แก้ role, เมนูที่มองเห็นได้ และลบบัญชีจากตารางเดียว"
+        />
+
+        <p className="mb-3 text-sm text-[var(--muted-foreground)]">
+          บัญชีผู้ดูแลระบบคนสุดท้ายจะถูกป้องกันไม่ให้ลดสิทธิ์หรือลบออก
+        </p>
+
+        <div className={tableWrapClass}>
+          <div className="overflow-x-auto">
+            <table className={tableBaseClass}>
+              <thead className="bg-[var(--surface-strong)] text-left">
+                <tr className="text-xs uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
+                  <th className="px-3 py-3">ผู้ใช้งาน</th>
+                  <th className="px-3 py-3">บริษัท</th>
+                  <th className="px-3 py-3">สิทธิ์ผู้ใช้</th>
+                  <th className="px-3 py-3">เมนูที่เห็นได้</th>
+                  <th className="px-3 py-3">อัปเดตล่าสุด</th>
+                  <th className="px-3 py-3">จัดการ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleUsers.map((user) => {
+                  const isDefaultAdmin = user.id === "admin-local" || user.email === DEFAULT_ADMIN_EMAIL;
+                  const isLastAdmin = user.role === "admin" && adminCount <= 1;
+                  const disableDelete = isDefaultAdmin || isLastAdmin || deletingUserId === user.id;
+                  const disableRoleEdit = updatingUserId === user.id || isLastAdmin;
+                  const disableMenuEdit = updatingUserId === user.id || user.role === "admin";
+                  return (
+                    <tr key={user.id} className="border-t border-[var(--border)] align-top">
+                      <td className="px-3 py-3">
+                        <div className="flex items-start gap-3">
+                          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-soft)] font-semibold text-[var(--foreground)]">
+                            {user.company === "QMIX" ? "Q" : "C"}
+                          </div>
+                          <div className="space-y-1">
+                            <strong className="block text-sm text-[var(--foreground)]">{user.name}</strong>
+                            <span className="block text-sm text-[var(--muted-foreground)]">{user.email}</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Badge variant="secondary">{user.company}</Badge>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div>
+                          <select
+                            value={user.role}
+                            disabled={disableRoleEdit}
+                            onChange={(event) =>
+                              handleUserRoleChange(user.id, event.target.value as "admin" | "user")
+                            }
+                            className={selectClass}
+                          >
+                            <option value="user">ผู้ใช้งาน</option>
+                            <option value="admin">ผู้ดูแลระบบ</option>
+                          </select>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div>
+                          <MenuCheckboxes
+                            menus={
+                              user.role === "admin"
+                                ? ALL_MENU_OPTIONS
+                                : user.menuPermissions
+                            }
+                            disabled={disableMenuEdit}
+                            onToggle={(menu) => void handleUserMenuToggle(user.id, menu)}
+                          />
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-sm text-[var(--muted-foreground)]">
+                        {formatAdminDate(user.updatedAt)}
+                      </td>
+                      <td className="px-3 py-3">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={disableDelete}
+                          onClick={() => void handleDeleteUser(user.id, user.email)}
+                        >
+                          <Trash2 className="size-4" />
+                          {deletingUserId === user.id ? "กำลังลบ..." : "ลบผู้ใช้"}
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         {users.length > ADMIN_TABLE_PAGE_SIZE ? (
-          <div className="adminUserPagination paginationBar">
-            <span className="paginationSummary">
-              แสดง {firstUserIndex}-{lastUserIndex} จาก {users.length} users
+          <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <span className="text-sm text-[var(--muted-foreground)]">
+              แสดง {firstUserIndex}-{lastUserIndex} จาก {users.length} บัญชี
             </span>
             <Pagination className="mx-0 w-auto justify-end">
               <PaginationContent>
@@ -575,44 +1163,8 @@ export function AdminPanel({ authUser }: AdminPanelProps) {
           </div>
         ) : null}
       </section>
-
-      <section className="panel adminPanel">
-        <div className="adminHeader">
-          <div>
-            <p className="eyebrow">Email outbox</p>
-            <h2>อีเมลที่ระบบเตรียมส่ง</h2>
-            <p>ใช้สำหรับคัดลอกข้อความพร้อมรหัสผ่านไปส่งต่อให้ผู้ใช้ เมื่ออีเมลอัตโนมัติยังส่งตรงไม่ได้</p>
-          </div>
-          <span>{outbox.length} ฉบับ</span>
-        </div>
-        {outbox.length === 0 ? <p className="adminEmpty">ยังไม่มีอีเมล</p> : null}
-        <div className="adminOutbox">
-          {outbox.map((email) => (
-            <article key={email.id} className="adminEmailCard">
-              <div className="adminCardTop">
-                <div className="adminAvatar mail"><Mail /></div>
-                <div className="adminCardIdentity">
-                  <strong>{email.to}</strong>
-                  <span>{email.subject}</span>
-                  <small>{formatAdminDate(email.createdAt)}</small>
-                </div>
-                <span className="adminCompanyPill">{formatDeliveryBadge(email.deliveryStatus)}</span>
-              </div>
-              <div className="adminCardActions">
-                <button
-                  type="button"
-                  className="adminSecondaryButton"
-                  onClick={() => void handleCopyEmailBody(email.id, email.body)}
-                >
-                  {copiedEmailId === email.id ? "คัดลอกแล้ว" : "คัดลอกข้อความอีเมล"}
-                </button>
-              </div>
-              {email.deliveryError ? <p className="adminMessage error">{email.deliveryError}</p> : null}
-              <pre>{email.body}</pre>
-            </article>
-          ))}
-        </div>
-      </section>
-    </main>
+      </>
+      ) : null}
+    </div>
   );
 }

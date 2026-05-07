@@ -202,6 +202,10 @@ function getMonthWeekPeriod(day: string) {
   return { periodStart, periodEnd };
 }
 
+export function getDashboardWeekPeriod(day: string) {
+  return getMonthWeekPeriod(day);
+}
+
 function aggregateTrendPoints(points: TrendPoint[]) {
   const grouped = new Map<string, TrendPoint[]>();
 
@@ -345,16 +349,28 @@ export function getTrendPointsByGranularity({
 export function getFilteredAverageTrend({
   meta,
   trend,
-  trendRange
+  trendRange,
+  customStart,
+  customEnd
 }: {
   meta: MetaResponse | null;
   trend: TrendPoint[];
   trendRange: TrendRange;
+  customStart?: string;
+  customEnd?: string;
 }) {
-  const baseTrend =
+  let baseTrend =
     meta && trendRange === "post25"
       ? trend.filter((point) => point.day >= meta.config.campaignStart)
       : trend;
+
+  if (trendRange === "custom") {
+    baseTrend = baseTrend.filter((point) => {
+      const isAfterStart = customStart ? point.day >= customStart : true;
+      const isBeforeEnd = customEnd ? point.day <= customEnd : true;
+      return isAfterStart && isBeforeEnd;
+    });
+  }
 
   if (trendRange === "last14") {
     return baseTrend.slice(-14);
@@ -378,18 +394,20 @@ function aggregateDivisionPriceTrendPoints(points: DivisionPriceTrendPoint[]) {
       day: string;
       periodEnd: string;
       divisionName: string;
+      fcName?: string;
       netPriceTotal: number;
       siteCount: number;
     }
   >();
 
   points.forEach((point) => {
-    const { periodStart, periodEnd } = getMonthWeekPeriod(point.day);
-    const key = `${periodStart}__${point.divisionName}`;
+    const { periodStart } = getMonthWeekPeriod(point.day);
+    const key = `${periodStart}__${point.divisionName}__${point.fcName ?? ""}`;
     const current = grouped.get(key) ?? {
       day: periodStart,
-      periodEnd,
+      periodEnd: point.day,
       divisionName: point.divisionName,
+      fcName: point.fcName,
       netPriceTotal: 0,
       siteCount: 0
     };
@@ -404,13 +422,16 @@ function aggregateDivisionPriceTrendPoints(points: DivisionPriceTrendPoint[]) {
     .filter((point) => point.siteCount > 0)
     .sort((left, right) =>
       left.day === right.day
-        ? left.divisionName.localeCompare(right.divisionName)
+        ? `${left.divisionName}__${left.fcName ?? ""}`.localeCompare(`${right.divisionName}__${right.fcName ?? ""}`)
         : left.day.localeCompare(right.day)
     )
     .map((point) => ({
       day: point.day,
-      periodEnd: point.periodEnd,
+      periodEnd: point.periodEnd < getMonthWeekPeriod(point.day).periodEnd
+        ? point.periodEnd
+        : getMonthWeekPeriod(point.day).periodEnd,
       divisionName: point.divisionName,
+      ...(point.fcName ? { fcName: point.fcName } : {}),
       avgNetPrice: point.netPriceTotal / point.siteCount,
       siteCount: point.siteCount
     }));
@@ -429,16 +450,28 @@ export function getDivisionPriceTrendByGranularity({
 export function getFilteredDivisionPriceTrend({
   meta,
   trend,
-  trendRange
+  trendRange,
+  customStart,
+  customEnd
 }: {
   meta: MetaResponse | null;
   trend: DivisionPriceTrendPoint[];
   trendRange: TrendRange;
+  customStart?: string;
+  customEnd?: string;
 }) {
-  const baseTrend =
+  let baseTrend =
     meta && trendRange === "post25"
       ? trend.filter((point) => point.day >= meta.config.campaignStart)
       : trend;
+
+  if (trendRange === "custom") {
+    baseTrend = baseTrend.filter((point) => {
+      const isAfterStart = customStart ? point.day >= customStart : true;
+      const isBeforeEnd = customEnd ? point.day <= customEnd : true;
+      return isAfterStart && isBeforeEnd;
+    });
+  }
   const uniqueDays = [...new Set(baseTrend.map((point) => point.day))].sort((left, right) =>
     left.localeCompare(right)
   );
@@ -458,14 +491,32 @@ export function getFilteredDivisionPriceTrend({
 
 export function buildDivisionPriceChartData({
   trend,
-  divisions
+  divisions,
+  expandedDivisions = []
 }: {
   trend: DivisionPriceTrendPoint[];
   divisions: string[];
+  expandedDivisions?: string[];
 }) {
   const selectedDivisions = divisions.length > 0 ? divisions : [...new Set(trend.map((point) => point.divisionName))];
   const selectedDivisionSet = new Set(selectedDivisions);
-  const points = trend.filter((point) => selectedDivisionSet.has(point.divisionName));
+  const expandedDivisionSet = new Set(expandedDivisions);
+  const fcSeries = [
+    ...new Set(
+      trend
+        .filter((point) => point.fcName && expandedDivisionSet.has(point.divisionName))
+        .map((point) => String(point.fcName))
+    )
+  ].sort((left, right) => left.localeCompare(right));
+  const chartSeries = [...selectedDivisions, ...fcSeries];
+  const chartSeriesSet = new Set(chartSeries);
+  const points = trend.filter((point) => {
+    if (point.fcName) {
+      return expandedDivisionSet.has(point.divisionName) && chartSeriesSet.has(point.fcName);
+    }
+
+    return selectedDivisionSet.has(point.divisionName);
+  });
   const days = [...new Set(points.map((point) => point.day))].sort((left, right) => left.localeCompare(right));
   const periodEndByDay = new Map(
     points
@@ -484,9 +535,11 @@ export function buildDivisionPriceChartData({
   );
 
   points.forEach((point) => {
+    const seriesName = point.fcName ?? point.divisionName;
     const current = pointByDay.get(point.day);
     if (current) {
-      current[point.divisionName] = point.avgNetPrice;
+      current[seriesName] = point.avgNetPrice;
+      current[`${seriesName}SiteCount`] = point.siteCount;
       if ("periodEnd" in point && typeof (point as { periodEnd?: string }).periodEnd === "string") {
         current.periodEnd = (point as { periodEnd?: string }).periodEnd;
       }
@@ -494,7 +547,7 @@ export function buildDivisionPriceChartData({
   });
 
   return {
-    divisions: selectedDivisions,
+    divisions: chartSeries,
     data: days.map((day) => pointByDay.get(day) ?? createEmptyDivisionSeriesPoint(day))
   };
 }

@@ -8,6 +8,16 @@ type DashboardFilterQueryOptions = {
   baselineEnd?: string;
 };
 
+export function normalizeQueryValues(values: string[]) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+  ).sort();
+}
+
 export function buildDashboardFilterQuery({
   divisions,
   segments,
@@ -18,25 +28,30 @@ export function buildDashboardFilterQuery({
   baselineEnd
 }: DashboardFilterQueryOptions) {
   const params = new URLSearchParams();
+  const normalizedDivisions = normalizeQueryValues(divisions);
+  const normalizedSegments = normalizeQueryValues(segments);
+  const normalizedChannels = normalizeQueryValues(channels);
+  const normalizedFcNames = normalizeQueryValues(fcNames);
+  const normalizedDiscountTypes = normalizeQueryValues(discountTypes);
 
-  if (divisions.length > 0) {
-    params.set("divisions", divisions.join(","));
+  if (normalizedDivisions.length > 0) {
+    params.set("divisions", normalizedDivisions.join(","));
   }
 
-  if (segments.length > 0) {
-    params.set("segments", segments.join(","));
+  if (normalizedSegments.length > 0) {
+    params.set("segments", normalizedSegments.join(","));
   }
 
-  if (channels.length > 0) {
-    params.set("channels", channels.join(","));
+  if (normalizedChannels.length > 0) {
+    params.set("channels", normalizedChannels.join(","));
   }
 
-  if (fcNames.length > 0) {
-    params.set("fcNames", fcNames.join(","));
+  if (normalizedFcNames.length > 0) {
+    params.set("fcNames", normalizedFcNames.join(","));
   }
 
-  if (discountTypes.length > 0) {
-    params.set("discountTypes", discountTypes.join(","));
+  if (normalizedDiscountTypes.length > 0) {
+    params.set("discountTypes", normalizedDiscountTypes.join(","));
   }
 
   if (baselineStart) {
@@ -48,6 +63,18 @@ export function buildDashboardFilterQuery({
   }
 
   return params;
+}
+
+export function buildCanonicalQueryKey(params: URLSearchParams) {
+  const entries = Array.from(params.entries()).sort(([leftKey, leftValue], [rightKey, rightValue]) => {
+    if (leftKey === rightKey) {
+      return leftValue.localeCompare(rightValue);
+    }
+
+    return leftKey.localeCompare(rightKey);
+  });
+
+  return new URLSearchParams(entries).toString();
 }
 
 export function summarizeMultiSelect(selectedValues: string[], fallbackLabel: string) {

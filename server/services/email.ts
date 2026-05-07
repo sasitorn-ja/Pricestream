@@ -6,6 +6,7 @@ type EmailInput = {
   to: string;
   subject: string;
   body: string;
+  html?: string;
 };
 
 export type EmailDeliveryResult = {
@@ -140,7 +141,8 @@ async function sendWithSmtp(input: EmailInput): Promise<EmailDeliveryResult> {
       from: config.from,
       to: input.to,
       subject: input.subject,
-      text: input.body
+      text: input.body,
+      html: input.html
     });
   } catch (error) {
     return {

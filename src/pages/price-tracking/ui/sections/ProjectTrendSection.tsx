@@ -9,7 +9,8 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-
+import { Button } from "../../../../components/ui/button";
+import { appShellClass, emptyStateClass, sectionClass } from "../../../../components/ui/styles";
 import { bucketColors } from "../../constants";
 import type {
   CalcHelpKey,
@@ -29,6 +30,53 @@ type ProjectTrendSectionProps = {
   onOpenCalcHelp: (key: CalcHelpKey) => void;
 };
 
+const tooltipStyle = {
+  backgroundColor: "var(--surface-strong)",
+  border: "1px solid var(--border)",
+  borderRadius: "18px",
+  color: "var(--foreground)"
+};
+
+type ProjectTrendPointLabelProps = {
+  x?: unknown;
+  y?: unknown;
+  value?: unknown;
+};
+
+function renderProjectTrendPointLabel(color: string, offsetY = -12) {
+  return ({ x, y, value }: ProjectTrendPointLabelProps) => {
+    if (
+      typeof x !== "number" ||
+      typeof y !== "number" ||
+      value === null ||
+      value === undefined ||
+      !Number.isFinite(Number(value)) ||
+      Number(value) <= 0
+    ) {
+      return null;
+    }
+
+    return (
+      <text
+        x={x}
+        y={y + offsetY}
+        fill={color}
+        fontSize={11}
+        fontWeight={700}
+        paintOrder="stroke"
+        stroke="var(--surface)"
+        strokeWidth={3}
+        textAnchor="middle"
+      >
+        {formatNumber(Number(value))}
+      </text>
+    );
+  };
+}
+
+const renderPricePointLabel = renderProjectTrendPointLabel("var(--price-line)", -12);
+const renderIncreasePointLabel = renderProjectTrendPointLabel(bucketColors.top, -12);
+
 export function ProjectTrendSection({
   meta,
   selectedSite,
@@ -39,63 +87,64 @@ export function ProjectTrendSection({
   onOpenCalcHelp
 }: ProjectTrendSectionProps) {
   return (
-    <section className="twoColumn">
-      <article className="panel">
-        <div className="panelHeader">
-          <div>
-            <h2>แนวโน้มรายโครงการ</h2>
-            <p>
-              {selectedTrend[0]?.siteName ?? "เลือกไซต์จากตารางด้านล่าง"}{" "}
-              {selectedSite ? `(${selectedSite})` : ""}
+    <div className={appShellClass}>
+      <section className={sectionClass}>
+        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <h2 className="text-2xl font-semibold text-[var(--foreground)]">แนวโน้มรายโครงการ</h2>
+            <p className="text-sm text-[var(--foreground)]">
+              {selectedTrend[0]?.siteName ?? "เลือกไซต์จากตารางด้านล่าง"} {selectedSite ? `(${selectedSite})` : ""}
             </p>
-            <p className="chartNote">
+            <p className="text-sm leading-6 text-[var(--muted-foreground)]">
               {meta
                 ? `${meta.config.baselineStart} ถึง ${meta.config.baselineEnd} = ช่วง Baseline; หลัง ${meta.config.baselineEnd} = ช่วงติดตามผล`
                 : "ช่วง Baseline = ช่วงราคาอ้างอิง; หลัง Baseline = ช่วงติดตามผล"}
             </p>
           </div>
-          <button
-            type="button"
-            className="calcHelpButton compact"
-            onClick={() => onOpenCalcHelp("projectTrend")}
-          >
+          <Button variant="outline" size="sm" onClick={() => onOpenCalcHelp("projectTrend")}>
             วิธีคำนวณ
-          </button>
+          </Button>
         </div>
-        <div className="chartWrap">
+
+        <div className="h-[380px] rounded-[24px] border border-[var(--border)] bg-[var(--surface-muted)] p-3 md:p-4">
           {!selectedSite ? (
-            <div className="emptyState">
-              <strong>เลือกไซต์จากตารางด้านล่าง</strong>
-              <span>เมื่อเลือกโครงการแล้ว กราฟแนวโน้มรายโครงการจะแสดงที่นี่</span>
+            <div className={emptyStateClass}>
+              <strong className="text-lg text-[var(--foreground)]">เลือกไซต์จากตารางด้านล่าง</strong>
+              <span className="mt-2 max-w-lg text-sm leading-6 text-[var(--muted-foreground)]">
+                เมื่อเลือกโครงการแล้ว กราฟแนวโน้มรายโครงการจะแสดงที่นี่
+              </span>
             </div>
           ) : selectedTrendLoading ? (
-            <div className="emptyState">
-              <strong>กำลังโหลดแนวโน้มรายโครงการ...</strong>
-              <span>
+            <div className={emptyStateClass}>
+              <strong className="text-lg text-[var(--foreground)]">กำลังโหลดแนวโน้มรายโครงการ...</strong>
+              <span className="mt-2 max-w-lg text-sm leading-6 text-[var(--muted-foreground)]">
                 {showSelectedTrendSlowNotice
                   ? "ข้อมูลชุดนี้ใช้เวลานานกว่าปกติ ระบบยังโหลดต่ออยู่"
                   : "กำลังอัปเดตกราฟตามตัวกรองล่าสุด"}
               </span>
             </div>
           ) : selectedTrendChartData.length === 0 ? (
-            <div className="emptyState">
-              <strong>ยังไม่มีข้อมูลแนวโน้มของโครงการนี้</strong>
-              <span>ลองเปลี่ยนวันหรือ filter เพื่อดูข้อมูลเพิ่มเติม</span>
+            <div className={emptyStateClass}>
+              <strong className="text-lg text-[var(--foreground)]">ยังไม่มีข้อมูลแนวโน้มของโครงการนี้</strong>
+              <span className="mt-2 max-w-lg text-sm leading-6 text-[var(--muted-foreground)]">
+                ลองปรับช่วงเวลา หรือเลือกไซต์อื่นเพื่อดูข้อมูลเพิ่มเติม
+              </span>
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={selectedTrendChartData} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2f3e65" />
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={280}>
+              <LineChart data={selectedTrendChartData} margin={{ top: 36, right: 12, left: 4, bottom: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
                 <XAxis
                   dataKey="day"
                   tickFormatter={formatShortDate}
-                  stroke="#9fb0d0"
-                  minTickGap={18}
+                  stroke="var(--chart-label)"
+                  tick={{ fontSize: 12 }}
+                  tickMargin={8}
                 />
                 <YAxis
                   yAxisId="price"
-                  stroke="#7dd3fc"
-                  tick={{ fill: "#7dd3fc", fontWeight: 700 }}
+                  stroke="var(--price-line)"
+                  tick={{ fill: "var(--price-line)", fontWeight: 700 }}
                   tickFormatter={formatNumber}
                   width={84}
                   tickCount={5}
@@ -104,7 +153,7 @@ export function ProjectTrendSection({
                     value: "ราคาขาย",
                     angle: -90,
                     position: "insideLeft",
-                    fill: "#7dd3fc",
+                    fill: "var(--price-line)",
                     fontSize: 12,
                     fontWeight: 700
                   }}
@@ -128,6 +177,7 @@ export function ProjectTrendSection({
                   }}
                 />
                 <Tooltip
+                  contentStyle={tooltipStyle}
                   formatter={(value, name, item) => {
                     const point = item.payload as ProjectTrendChartPoint;
 
@@ -173,10 +223,11 @@ export function ProjectTrendSection({
                   type="monotone"
                   yAxisId="price"
                   dataKey="postNetPrice"
-                  stroke="#7dd3fc"
+                  stroke="var(--price-line)"
                   strokeWidth={3}
                   dot={false}
                   activeDot={false}
+                  label={renderPricePointLabel}
                   name="ราคาขาย (บาท)"
                 />
                 <Line
@@ -186,13 +237,14 @@ export function ProjectTrendSection({
                   stroke={bucketColors.top}
                   strokeWidth={3}
                   dot
+                  label={renderIncreasePointLabel}
                   name="ขึ้นราคา (บาท)"
                 />
               </LineChart>
             </ResponsiveContainer>
           )}
         </div>
-      </article>
-    </section>
+      </section>
+    </div>
   );
 }

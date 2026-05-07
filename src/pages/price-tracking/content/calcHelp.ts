@@ -72,6 +72,16 @@ export function buildCalcHelpContent({
         "เมื่อเลือก Division, Segment หรือ DISCOUNT_TYPE กราฟนี้จะคำนวณใหม่เฉพาะกลุ่มที่เลือก"
       ]
     },
+    divisionPriceTrendTable: {
+      title: "Net Price trend เทียบฐานราคา คำนวณยังไง",
+      lines: [
+        "ตารางนี้แสดงส่วนต่างของ Net Price เฉลี่ยรายสัปดาห์ เทียบกับ Net Price เฉลี่ยของเดือนฐาน แยกตาม Division",
+        "เลขในช่อง = Net Price เฉลี่ยของ Division ในสัปดาห์นั้น - Net Price เฉลี่ยของ Division ในเดือนฐาน",
+        "Net Price เฉลี่ยคำนวณแบบถ่วงจำนวน site: SUM(avgNetPrice x siteCount) / SUM(siteCount)",
+        "เลขบวกแปลว่าราคาสัปดาห์นั้นสูงกว่าเดือนฐาน เลขลบแปลว่าต่ำกว่าเดือนฐาน",
+        "เครื่องหมาย '-' แปลว่าไม่มีข้อมูลพอให้คำนวณหรือไม่มีฐานราคาของ Division นั้นในเดือนฐาน"
+      ]
+    },
     projectTrend: {
       title: "Project trend อ่านยังไง",
       lines: [

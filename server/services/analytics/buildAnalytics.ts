@@ -540,6 +540,7 @@ export function buildAnalytics(records: PricingRecord[], options: AnalyticsOptio
     {
       day: string;
       divisionName: string;
+      fcName?: string;
       netPriceTotal: number;
       siteCount: number;
     }
@@ -551,28 +552,38 @@ export function buildAnalytics(records: PricingRecord[], options: AnalyticsOptio
     }
 
     const postNetPrice = value.priceWeightedTotal / value.totalVolume;
+    const addTrendPoint = (key: string, fcName?: string) => {
+      const current = divisionPriceTrendByDay.get(key) ?? {
+        day: value.day,
+        divisionName: value.divisionName,
+        fcName,
+        netPriceTotal: 0,
+        siteCount: 0
+      };
 
-    const key = `${value.day}__${value.divisionName}`;
-    const current = divisionPriceTrendByDay.get(key) ?? {
-      day: value.day,
-      divisionName: value.divisionName,
-      netPriceTotal: 0,
-      siteCount: 0
+      current.netPriceTotal += postNetPrice;
+      current.siteCount += 1;
+      divisionPriceTrendByDay.set(key, current);
     };
 
-    current.netPriceTotal += postNetPrice;
-    current.siteCount += 1;
-    divisionPriceTrendByDay.set(key, current);
+    addTrendPoint(`${value.day}__division__${value.divisionName}`);
+
+    if (value.fcName) {
+      addTrendPoint(`${value.day}__fc__${value.divisionName}__${value.fcName}`, value.fcName);
+    }
   }
 
   const divisionPriceTrend: DivisionPriceTrendPoint[] = [...divisionPriceTrendByDay.values()]
     .filter((row) => row.siteCount > 0)
     .sort((a, b) =>
-      a.day === b.day ? a.divisionName.localeCompare(b.divisionName) : a.day.localeCompare(b.day)
+      a.day === b.day
+        ? `${a.divisionName}__${a.fcName ?? ""}`.localeCompare(`${b.divisionName}__${b.fcName ?? ""}`)
+        : a.day.localeCompare(b.day)
     )
     .map((row) => ({
       day: row.day,
       divisionName: row.divisionName,
+      ...(row.fcName ? { fcName: row.fcName } : {}),
       avgNetPrice: round2(row.netPriceTotal / row.siteCount),
       siteCount: row.siteCount
     }));

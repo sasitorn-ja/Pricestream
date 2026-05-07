@@ -1,5 +1,7 @@
 import CryptoJS from "crypto-js";
 
+export type LocalAuthMenuPermission = "dashboard-cpac" | "dashboard-qmix" | "admin";
+
 export type ExternalAuthUser = {
   USERN: string;
   EMP?: string;
@@ -33,8 +35,9 @@ export type AuthUser = {
   email: string;
   role: "admin" | "user";
   company?: "CPAC" | "QMIX";
+  mustChangePassword?: boolean;
   address?: string;
-  menuPermissions?: string[];
+  menuPermissions?: LocalAuthMenuPermission[];
   token?: string;
   position?: string;
   department?: string;
