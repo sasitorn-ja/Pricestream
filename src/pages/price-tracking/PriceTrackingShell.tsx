@@ -12,7 +12,7 @@ import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
 import { PriceTrackingNavigation } from "./PriceTrackingNavigation";
 import { type AuthUser } from "../../services/auth/authUser";
-import { getAdminNotificationSummary, type AppMenuKey } from "../../services/auth/localAuth";
+import { getAdminNotificationSummary, recordPresence, type AppMenuKey } from "../../services/auth/localAuth";
 
 const SIDEBAR_MENU_META: Record<
   AppMenuKey,
@@ -39,6 +39,7 @@ const SIDEBAR_MENU_META: Record<
   }
 };
 const ADMIN_NOTIFICATIONS_REFRESH_EVENT = "admin-notifications-refresh";
+const PRESENCE_HEARTBEAT_MS = 20_000;
 
 function getCompanyDisplayName(company?: string) {
   return company ?? "ระบบกลาง";
@@ -118,6 +119,46 @@ export function PriceTrackingShell({
       window.clearTimeout(timeoutId);
     };
   }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+    let isInFlight = false;
+
+    const sendPresence = async () => {
+      if (isCancelled || isInFlight || document.visibilityState === "hidden") {
+        return;
+      }
+
+      isInFlight = true;
+      try {
+        await recordPresence();
+      } catch {
+        // Presence is best-effort and should not interrupt dashboard usage.
+      } finally {
+        isInFlight = false;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void sendPresence();
+      }
+    };
+
+    void sendPresence();
+    const intervalId = window.setInterval(() => {
+      void sendPresence();
+    }, PRESENCE_HEARTBEAT_MS);
+    window.addEventListener("focus", sendPresence);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", sendPresence);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [authUser.id]);
 
   useEffect(() => {
     if (!isMobileViewport || !isMobileSidebarOpen) {

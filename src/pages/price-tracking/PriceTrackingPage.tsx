@@ -199,6 +199,7 @@ export function PriceTrackingPage({
   const hasMountedRef = useRef(false);
   const selectedSiteRef = useRef(cachedBootstrap?.selectedSite ?? "");
   const skipNextBootstrapRefreshRef = useRef(false);
+  const skipNextProjectsRefreshRef = useRef(false);
   const skipNextSelectedTrendRefreshRef = useRef(false);
   const previousTableFilterResetKeyRef = useRef("");
   const pendingPageResetRef = useRef(false);
@@ -623,6 +624,7 @@ export function PriceTrackingPage({
             snapshotFetchedAt: bootstrapResponse.snapshotFetchedAt
           });
         }
+        skipNextProjectsRefreshRef.current = true;
         skipNextBootstrapRefreshRef.current = true;
         skipNextSelectedTrendRefreshRef.current = true;
         logClientTiming("time_to_first_dashboard_render", startedAt, {
@@ -691,6 +693,11 @@ export function PriceTrackingPage({
       }),
     [debouncedSearch, debouncedSelectedBuckets, debouncedSelectedDay, debouncedQueryFilterState]
   );
+  const shouldBootstrapHydrateProjects =
+    currentPage === 1 &&
+    !debouncedSelectedDay &&
+    !debouncedSearch &&
+    debouncedSelectedBuckets.length === 0;
 
   useEffect(() => {
     if (!previousTableFilterResetKeyRef.current) {
@@ -769,6 +776,20 @@ export function PriceTrackingPage({
             hasData: bootstrapResponse.hasData
           }
         );
+        if (shouldBootstrapHydrateProjects) {
+          const hydratedProjectsResponse = {
+            rows: bootstrapResponse.projects.rows,
+            total: bootstrapResponse.projects.total,
+            generatedAt: bootstrapResponse.generatedAt,
+            snapshotFetchedAt: bootstrapResponse.snapshotFetchedAt,
+            isStale: bootstrapResponse.isStale,
+            isRefreshing: bootstrapResponse.isRefreshing,
+            hasData: bootstrapResponse.hasData
+          };
+          projectsCacheRef.current.set(projectsQueryKey, hydratedProjectsResponse);
+          applyProjectsResponse(hydratedProjectsResponse, selectedSiteRef.current);
+          skipNextProjectsRefreshRef.current = true;
+        }
         applyDashboardResponse(bootstrapResponse);
         if (
           bootstrapResponse.selectedSite &&
@@ -835,11 +856,17 @@ export function PriceTrackingPage({
     bootstrapQueryParams,
     dashboardDivision,
     debouncedQueryFilterState,
+    projectsQueryKey,
+    shouldBootstrapHydrateProjects,
     selectedTrendQueryParams
   ]);
 
   useEffect(() => {
     if (isBootstrapping || pendingPageResetRef.current) {
+      return;
+    }
+    if (skipNextProjectsRefreshRef.current) {
+      skipNextProjectsRefreshRef.current = false;
       return;
     }
 
@@ -1210,6 +1237,9 @@ export function PriceTrackingPage({
     />
   );
   const hasDashboardAlert = !hasDashboardData || !hasTrendData || Boolean(dashboardError);
+  const hasActionableDashboardAlert =
+    Boolean(dashboardError || dashboardRefreshError) ||
+    (!coldDataLoading && !dashboardBackendRefreshing && (!hasDashboardData || !hasTrendData));
   const dashboardAlertLabel = !hasDashboardData
     ? dashboardRefreshError
       ? `refresh ข้อมูลไม่สำเร็จ: ${dashboardRefreshError}`
@@ -1224,7 +1254,7 @@ export function PriceTrackingPage({
   const pendingNotificationCount =
     adminNotificationSummary.pendingRequestCount +
     (adminNotificationSummary.dataOceanTokenAlert ? 1 : 0) +
-    (hasDashboardAlert ? 1 : 0);
+    (hasActionableDashboardAlert ? 1 : 0);
   const dataOceanAlertLabel =
     adminNotificationSummary.dataOceanDaysRemaining !== null &&
     adminNotificationSummary.dataOceanDaysRemaining <= 0
@@ -1237,7 +1267,7 @@ export function PriceTrackingPage({
   const notificationLabel =
     pendingNotificationCount > 0
       ? [
-          hasDashboardAlert ? dashboardAlertLabel : null,
+          hasActionableDashboardAlert ? dashboardAlertLabel : null,
           adminNotificationSummary.pendingRequestCount > 0
             ? `มีคำขอสิทธิ์รออนุมัติ ${adminNotificationSummary.pendingRequestCount} รายการ`
             : null,
@@ -1247,7 +1277,7 @@ export function PriceTrackingPage({
           .join(" • ")
       : "ยังไม่มีคำขอสิทธิ์ใหม่";
   const openAdminNotifications = () => {
-    if (hasDashboardAlert) {
+    if (hasActionableDashboardAlert) {
       document.getElementById("dashboard-alert")?.scrollIntoView({
         behavior: "smooth",
         block: "center"

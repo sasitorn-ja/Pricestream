@@ -13,9 +13,11 @@ import {
   getAdminState,
   getAuthSubsystemStatus,
   getAuthUserFromToken,
+  getOnlineUsers,
   initializeAuthSubsystem,
   loginWithEmailPassword,
   logoutSession,
+  recordUserPresence,
   registerAccessRequest,
   updateDataOceanTokenConfig,
   updateUserPermissions
@@ -334,7 +336,11 @@ app.post("/api/auth/login", async (req, res) => {
     });
     const result = await loginWithEmailPassword(
       String(req.body?.email ?? ""),
-      String(req.body?.password ?? "")
+      String(req.body?.password ?? ""),
+      {
+        ipAddress: readClientAddress({ headers: req.headers, fallback: req.ip }),
+        userAgent: req.headers["user-agent"]
+      }
     );
     setSessionCookie(res, result.session.token, result.session.expiresAt);
     res.json(result.user);
@@ -360,7 +366,10 @@ app.get("/api/auth/me", async (req, res) => {
 
 app.post("/api/auth/logout", async (req, res) => {
   try {
-    await logoutSession(readSessionToken(req));
+    await logoutSession(readSessionToken(req), {
+      ipAddress: readClientAddress({ headers: req.headers, fallback: req.ip }),
+      userAgent: req.headers["user-agent"]
+    });
     clearSessionCookie(res);
     res.json({ ok: true });
   } catch (error) {
@@ -378,6 +387,17 @@ app.post("/api/auth/change-password", async (req, res) => {
   }
 });
 
+app.post("/api/auth/presence", async (req, res) => {
+  try {
+    res.json(await recordUserPresence(readSessionToken(req), {
+      ipAddress: readClientAddress({ headers: req.headers, fallback: req.ip }),
+      userAgent: req.headers["user-agent"]
+    }));
+  } catch (error) {
+    sendAuthError(res, error);
+  }
+});
+
 app.get("/api/auth/admin/state", async (req, res) => {
   try {
     res.json(await getAdminState(readSessionToken(req)));
@@ -389,6 +409,14 @@ app.get("/api/auth/admin/state", async (req, res) => {
 app.get("/api/auth/admin/notifications", async (req, res) => {
   try {
     res.json(await getAdminNotificationSummary(readSessionToken(req)));
+  } catch (error) {
+    sendAuthError(res, error);
+  }
+});
+
+app.get("/api/auth/admin/online-users", async (req, res) => {
+  try {
+    res.json(await getOnlineUsers(readSessionToken(req)));
   } catch (error) {
     sendAuthError(res, error);
   }

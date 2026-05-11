@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  Activity,
   Check,
   Database,
   Mail,
@@ -36,6 +37,7 @@ import { Textarea } from "../components/ui/textarea";
 import { cn } from "../lib/utils";
 import { type AuthUser } from "../services/auth/authUser";
 import {
+  type AuthAuditLog,
   APP_MENU_LABELS,
   approveAccessRequest,
   createLocalUser,
@@ -44,6 +46,8 @@ import {
   deleteLocalUser,
   type EmailDeliveryResult,
   getAdminState,
+  getOnlineUsers,
+  type OnlineUserRecord,
   updateDataOceanToken,
   updateLocalUser,
   type AdminState,
@@ -62,7 +66,7 @@ const ALL_MENU_OPTIONS: AppMenuKey[] = [...menuOptions];
 const DEFAULT_VALIDITY_DAYS = 360;
 const ADMIN_ACTIVE_VIEW_SESSION_KEY = "admin-active-view";
 const ADMIN_NOTIFICATIONS_REFRESH_EVENT = "admin-notifications-refresh";
-type AdminActiveView = "users" | "data-ocean";
+type AdminActiveView = "users" | "online" | "data-ocean";
 const EMPTY_DATAOCEAN_STATUS: DataOceanTokenStatus = {
   source: "missing",
   maskedToken: null,
@@ -98,7 +102,7 @@ function getDefaultMenuForCompany(company: CompanyCode): AppMenuKey {
 }
 
 function isAdminActiveView(value: unknown): value is AdminActiveView {
-  return value === "users" || value === "data-ocean";
+  return value === "users" || value === "online" || value === "data-ocean";
 }
 
 function getStoredAdminActiveView(): AdminActiveView {
@@ -165,6 +169,18 @@ function formatMetricDays(value: number | null) {
   return value === null ? "-" : `${value} วัน`;
 }
 
+function formatOnlineAge(value: string) {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 10) {
+    return "เมื่อสักครู่";
+  }
+  if (seconds < 60) {
+    return `${seconds} วินาทีที่แล้ว`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} นาทีที่แล้ว`;
+}
+
 function formatCredentialDeliveryMessage(result: EmailDeliveryResult, mode: "approve" | "create") {
   const prefix = mode === "approve" ? "อนุมัติผู้ใช้แล้ว" : "สร้างบัญชีผู้ใช้แล้ว";
 
@@ -181,6 +197,26 @@ function formatCredentialDeliveryMessage(result: EmailDeliveryResult, mode: "app
   }
 
   return `${prefix} แต่ส่งอีเมลไม่สำเร็จ${result.reason ? `: ${result.reason}` : ""}`;
+}
+
+function formatAuditEventLabel(eventType: AuthAuditLog["eventType"]) {
+  if (eventType === "login_success") {
+    return "Login สำเร็จ";
+  }
+  if (eventType === "login_failed") {
+    return "Login ไม่สำเร็จ";
+  }
+  return "Logout";
+}
+
+function getAuditEventVariant(eventType: AuthAuditLog["eventType"]) {
+  if (eventType === "login_success") {
+    return "success" as const;
+  }
+  if (eventType === "login_failed") {
+    return "destructive" as const;
+  }
+  return "outline" as const;
 }
 
 function isPositiveEmailDeliveryResult(result: EmailDeliveryResult) {
@@ -287,6 +323,7 @@ export function AdminPanel({ authUser }: AdminPanelProps) {
   const [adminState, setAdminState] = useState<AdminState>({
     users: [],
     requests: [],
+    authAuditLogs: [],
     dataOceanConfig: EMPTY_DATAOCEAN_STATUS
   });
   const [isLoadingAdminState, setIsLoadingAdminState] = useState(true);
@@ -310,9 +347,14 @@ export function AdminPanel({ authUser }: AdminPanelProps) {
   const [updatingUserId, setUpdatingUserId] = useState("");
   const [deletingUserId, setDeletingUserId] = useState("");
   const [activeAdminView, setActiveAdminView] = useState<AdminActiveView>(() => getStoredAdminActiveView());
+  const [onlineUsers, setOnlineUsers] = useState<OnlineUserRecord[]>([]);
+  const [onlineWindowSeconds, setOnlineWindowSeconds] = useState(90);
+  const [isLoadingOnlineUsers, setIsLoadingOnlineUsers] = useState(false);
+  const [onlineRefreshedAt, setOnlineRefreshedAt] = useState<string | null>(null);
 
   const requests = adminState.requests;
   const users = adminState.users;
+  const authAuditLogs = adminState.authAuditLogs;
   const dataOceanConfig = adminState.dataOceanConfig;
   const pendingRequests = requests.filter((request) => request.status === "pending");
   const adminCount = users.filter((user) => user.role === "admin").length;
@@ -334,6 +376,7 @@ export function AdminPanel({ authUser }: AdminPanelProps) {
     () => getMenuPermissionsForRole(createRole, createMenus, createDefaultMenu),
     [createDefaultMenu, createMenus, createRole]
   );
+  const latestOnlineUser = onlineUsers[0] ?? null;
 
   const forceRefresh = async () => {
     setIsLoadingAdminState(true);
@@ -368,6 +411,50 @@ export function AdminPanel({ authUser }: AdminPanelProps) {
     window.addEventListener("admin-view-change", handleAdminViewChange);
     return () => window.removeEventListener("admin-view-change", handleAdminViewChange);
   }, []);
+
+  useEffect(() => {
+    if (activeAdminView !== "online") {
+      return;
+    }
+
+    let isCancelled = false;
+    let hasLoaded = false;
+
+    const loadOnlineUsers = async () => {
+      if (!hasLoaded) {
+        setIsLoadingOnlineUsers(true);
+      }
+
+      try {
+        const response = await getOnlineUsers();
+        if (!isCancelled) {
+          setOnlineUsers(response.users);
+          setOnlineWindowSeconds(response.onlineWindowSeconds);
+          setOnlineRefreshedAt(new Date().toISOString());
+          hasLoaded = true;
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setMessageTone("error");
+          setMessage(error instanceof Error ? error.message : "โหลดรายชื่อผู้ใช้ออนไลน์ไม่สำเร็จ");
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoadingOnlineUsers(false);
+        }
+      }
+    };
+
+    void loadOnlineUsers();
+    const intervalId = window.setInterval(() => {
+      void loadOnlineUsers();
+    }, 10_000);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeAdminView]);
 
   const handleApprove = async (requestId: string, company: CompanyCode) => {
     const defaultMenu = getDefaultMenuForCompany(company);
@@ -636,6 +723,15 @@ export function AdminPanel({ authUser }: AdminPanelProps) {
             ผู้ใช้และคำขอ
           </Button>
           <Button
+            variant={activeAdminView === "online" ? "default" : "outline"}
+            size="sm"
+            className="rounded-full"
+            onClick={() => setActiveAdminView("online")}
+          >
+            <Activity className="size-4" />
+            ออนไลน์ตอนนี้
+          </Button>
+          <Button
             variant={activeAdminView === "data-ocean" ? "default" : "outline"}
             size="sm"
             className="rounded-full"
@@ -654,10 +750,140 @@ export function AdminPanel({ authUser }: AdminPanelProps) {
           </div>
         ) : null}
 
+        {activeAdminView === "online" ? (
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <StatCard icon={<Activity className="size-5" />} label="ออนไลน์ตอนนี้" value={onlineUsers.length} />
+            <StatCard icon={<Users className="size-5" />} label="จากผู้ใช้ทั้งหมด" value={users.length} />
+            <StatCard
+              icon={<RefreshCw className="size-5" />}
+              label="อัปเดตล่าสุด"
+              value={onlineRefreshedAt ? formatOnlineAge(onlineRefreshedAt) : "-"}
+            />
+          </div>
+        ) : null}
+
         {isLoadingAdminState ? (
           <p className="mt-4 text-sm text-[var(--muted-foreground)]">กำลังโหลดข้อมูลจากฐานข้อมูล...</p>
         ) : null}
       </section>
+
+      {activeAdminView === "online" ? (
+      <section className={sectionClass}>
+        <SectionIntro
+          eyebrow="Realtime Presence"
+          title="ผู้ใช้ออนไลน์ตอนนี้"
+          description={`นับจาก heartbeat ล่าสุดภายใน ${onlineWindowSeconds} วินาที เห็นเฉพาะผู้ดูแลระบบเท่านั้น`}
+          right={
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isLoadingOnlineUsers}
+              onClick={async () => {
+                setIsLoadingOnlineUsers(true);
+                try {
+                  const response = await getOnlineUsers();
+                  setOnlineUsers(response.users);
+                  setOnlineWindowSeconds(response.onlineWindowSeconds);
+                  setOnlineRefreshedAt(new Date().toISOString());
+                } catch (error) {
+                  setMessageTone("error");
+                  setMessage(error instanceof Error ? error.message : "โหลดรายชื่อผู้ใช้ออนไลน์ไม่สำเร็จ");
+                } finally {
+                  setIsLoadingOnlineUsers(false);
+                }
+              }}
+            >
+              <RefreshCw className={cn("size-4", isLoadingOnlineUsers && "animate-spin")} />
+              รีเฟรช
+            </Button>
+          }
+        />
+
+        {latestOnlineUser ? (
+          <div className="mb-4 rounded-[18px] border border-[var(--border)] bg-[var(--surface-muted)] p-3">
+            <div className="flex items-start gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-soft)]">
+                <Activity className="size-5 text-[var(--foreground)]" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-[var(--foreground)]">
+                  ล่าสุด: {latestOnlineUser.name} ({latestOnlineUser.email})
+                </p>
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  เห็นเมื่อ {formatOnlineAge(latestOnlineUser.lastSeenAt)}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isLoadingOnlineUsers && onlineUsers.length === 0 ? (
+          <div className={cn(emptyStateClass, "min-h-[10rem] py-6")}>
+            <div className="size-10 animate-spin rounded-full border-4 border-[var(--border)] border-t-[var(--primary)]" />
+            <strong className="mt-3 text-base text-[var(--foreground)]">กำลังโหลดรายชื่อออนไลน์...</strong>
+          </div>
+        ) : onlineUsers.length === 0 ? (
+          <div className={cn(emptyStateClass, "min-h-[10rem] py-6")}>
+            <strong className="text-base text-[var(--foreground)]">ยังไม่มีผู้ใช้ออนไลน์</strong>
+            <span className="mt-1 text-sm text-[var(--muted-foreground)]">
+              ผู้ใช้จะปรากฏเมื่อเปิดหน้า dashboard หรือ admin อยู่ในช่วงเวลาล่าสุด
+            </span>
+          </div>
+        ) : (
+          <div className={tableWrapClass}>
+            <div className="overflow-x-auto">
+              <table className={tableBaseClass}>
+                <thead className="bg-[var(--surface-strong)] text-left">
+                  <tr className="text-xs uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
+                    <th className="px-3 py-3">ผู้ใช้งาน</th>
+                    <th className="px-3 py-3">บริษัท</th>
+                    <th className="px-3 py-3">สิทธิ์</th>
+                    <th className="px-3 py-3">เห็นล่าสุด</th>
+                    <th className="px-3 py-3">IP</th>
+                    <th className="px-3 py-3">อุปกรณ์</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {onlineUsers.map((user) => (
+                    <tr key={user.id} className="border-t border-[var(--border)] align-top">
+                      <td className="px-3 py-3">
+                        <div className="flex items-start gap-3">
+                          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-soft)] font-semibold text-[var(--foreground)]">
+                            {user.company === "QMIX" ? "Q" : "C"}
+                          </div>
+                          <div className="space-y-1">
+                            <strong className="block text-sm text-[var(--foreground)]">{user.name}</strong>
+                            <span className="block text-sm text-[var(--muted-foreground)]">{user.email}</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Badge variant="secondary">{user.company}</Badge>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Badge variant={user.role === "admin" ? "success" : "outline"}>
+                          {user.role === "admin" ? "Admin" : "User"}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-3 text-sm text-[var(--muted-foreground)]">
+                        <span className="block text-[var(--foreground)]">{formatOnlineAge(user.lastSeenAt)}</span>
+                        <span className="block text-xs">{formatAdminDate(user.lastSeenAt)}</span>
+                      </td>
+                      <td className="px-3 py-3 text-sm text-[var(--muted-foreground)]">
+                        {user.ipAddress ?? "-"}
+                      </td>
+                      <td className="px-3 py-3 text-sm text-[var(--muted-foreground)]">
+                        <span className="block max-w-[420px] truncate">{user.userAgent ?? "-"}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </section>
+      ) : null}
 
       {activeAdminView === "data-ocean" ? (
       <section className={sectionClass}>
@@ -1162,6 +1388,69 @@ export function AdminPanel({ authUser }: AdminPanelProps) {
             </Pagination>
           </div>
         ) : null}
+      </section>
+
+      <section className={sectionClass}>
+        <SectionIntro
+          eyebrow="ประวัติการเข้าใช้งาน"
+          title="Recent Login Activity"
+          description="แสดงรายการล่าสุดว่าใครเข้าใช้งานหรือออกจากระบบเมื่อใด พร้อม IP และอุปกรณ์เบื้องต้น"
+        />
+
+        {authAuditLogs.length === 0 ? (
+          <div className={cn(emptyStateClass, "min-h-[10rem] py-6")}>
+            <strong className="text-base text-[var(--foreground)]">ยังไม่มีประวัติการเข้าใช้งาน</strong>
+            <span className="mt-1 text-sm text-[var(--muted-foreground)]">
+              เมื่อมีการ login หรือ logout รายการจะมาแสดงที่ส่วนนี้
+            </span>
+          </div>
+        ) : (
+          <div className={tableWrapClass}>
+            <div className="overflow-x-auto">
+              <table className={tableBaseClass}>
+                <thead className="bg-[var(--surface-strong)] text-left">
+                  <tr className="text-xs uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
+                    <th className="px-3 py-3">เวลา</th>
+                    <th className="px-3 py-3">เหตุการณ์</th>
+                    <th className="px-3 py-3">ผู้ใช้</th>
+                    <th className="px-3 py-3">IP</th>
+                    <th className="px-3 py-3">อุปกรณ์</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {authAuditLogs.map((log) => (
+                    <tr key={log.id} className="border-t border-[var(--border)] align-top">
+                      <td className="px-3 py-3 text-sm text-[var(--muted-foreground)]">
+                        {formatAdminDate(log.createdAt)}
+                      </td>
+                      <td className="px-3 py-3">
+                        <Badge variant={getAuditEventVariant(log.eventType)}>
+                          {formatAuditEventLabel(log.eventType)}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="space-y-1">
+                          <strong className="block text-sm text-[var(--foreground)]">
+                            {log.email ?? log.userId ?? "-"}
+                          </strong>
+                          {log.userId ? (
+                            <span className="block text-xs text-[var(--muted-foreground)]">{log.userId}</span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-sm text-[var(--muted-foreground)]">
+                        {log.ipAddress ?? "-"}
+                      </td>
+                      <td className="px-3 py-3 text-sm text-[var(--muted-foreground)]">
+                        <span className="block max-w-[420px] truncate">{log.userAgent ?? "-"}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </section>
       </>
       ) : null}

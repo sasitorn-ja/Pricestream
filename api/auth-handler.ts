@@ -7,9 +7,11 @@ import {
   formatAuthError,
   getAdminNotificationSummary,
   getAdminState,
+  getOnlineUsers,
   getAuthUserFromToken,
   loginWithEmailPassword,
   logoutSession,
+  recordUserPresence,
   registerAccessRequest,
   updateDataOceanTokenConfig,
   updateUserPermissions
@@ -66,7 +68,11 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       });
       const result = await loginWithEmailPassword(
         String(body?.email ?? ""),
-        String(body?.password ?? "")
+        String(body?.password ?? ""),
+        {
+          ipAddress: readClientAddress({ headers: req.headers }),
+          userAgent: readHeaderValue(req.headers, "user-agent")
+        }
       );
       res.setHeader?.("Set-Cookie", buildSessionCookie(result.session.token, result.session.expiresAt));
       return sendJson(res, result.user);
@@ -80,7 +86,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     }
 
     if (method === "POST" && path[0] === "logout") {
-      await logoutSession(readSessionToken(req));
+      await logoutSession(readSessionToken(req), {
+        ipAddress: readClientAddress({ headers: req.headers }),
+        userAgent: readHeaderValue(req.headers, "user-agent")
+      });
       res.setHeader?.("Set-Cookie", buildClearedSessionCookie());
       return sendJson(res, { ok: true });
     }
@@ -91,12 +100,26 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       return sendJson(res, { ok: result.ok });
     }
 
+    if (method === "POST" && path[0] === "presence") {
+      return sendJson(
+        res,
+        await recordUserPresence(readSessionToken(req), {
+          ipAddress: readClientAddress({ headers: req.headers }),
+          userAgent: readHeaderValue(req.headers, "user-agent")
+        })
+      );
+    }
+
     if (method === "GET" && path.join("/") === "admin/state") {
       return sendJson(res, await getAdminState(readSessionToken(req)));
     }
 
     if (method === "GET" && path.join("/") === "admin/notifications") {
       return sendJson(res, await getAdminNotificationSummary(readSessionToken(req)));
+    }
+
+    if (method === "GET" && path.join("/") === "admin/online-users") {
+      return sendJson(res, await getOnlineUsers(readSessionToken(req)));
     }
 
     if (

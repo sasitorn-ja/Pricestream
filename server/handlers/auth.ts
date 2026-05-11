@@ -62,6 +62,51 @@ type DbAccessRequest = {
   approved_by?: string | null;
 };
 
+type AuthAuditEventType = "login_success" | "login_failed" | "logout";
+
+type DbAuthAuditLog = {
+  id: string;
+  user_id: string | null;
+  email: string | null;
+  event_type: AuthAuditEventType;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+};
+
+type SanitizedAuthAuditLog = {
+  id: string;
+  userId: string | null;
+  email: string | null;
+  eventType: AuthAuditEventType;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+};
+
+type DbOnlineUser = DbUser & {
+  last_seen_at: string;
+  ip_address: string | null;
+  user_agent: string | null;
+};
+
+type SanitizedOnlineUser = {
+  id: string;
+  email: string;
+  name: string;
+  company: CompanyCode;
+  role: "admin" | "user";
+  menuPermissions: AppMenuKey[];
+  lastSeenAt: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+};
+
+type AuthRequestContext = {
+  ipAddress?: string;
+  userAgent?: string;
+};
+
 export const APP_MENU_LABELS: Record<AppMenuKey, string> = {
   "dashboard-cpac": "Dashboard ติดตามการขึ้นราคา (CPAC)",
   "dashboard-qmix": "Dashboard ติดตามการขึ้นราคา (QMIX)",
@@ -72,6 +117,8 @@ const DEFAULT_ADMIN_EMAIL = normalizeEmail(process.env.ADMIN_EMAIL || "");
 const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const DEFAULT_ADMIN_ID = "admin-local";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const ONLINE_PRESENCE_WINDOW_MS = 90 * 1000;
+const PRESENCE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_PUBLIC_APP_URL = "https://pricing-monitor-green.vercel.app/";
 const LOCAL_AUTH_FALLBACK_TOKEN = "local-dev-admin-session";
 let schemaReady: Promise<void> | null = null;
@@ -192,6 +239,37 @@ function sanitizeRequest(request: DbAccessRequest) {
   };
 }
 
+function sanitizeAuditLog(log: DbAuthAuditLog): SanitizedAuthAuditLog {
+  return {
+    id: log.id,
+    userId: log.user_id,
+    email: log.email,
+    eventType: log.event_type,
+    ipAddress: log.ip_address,
+    userAgent: log.user_agent,
+    createdAt: log.created_at
+  };
+}
+
+function sanitizeOnlineUser(user: DbOnlineUser): SanitizedOnlineUser {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    company: user.company,
+    role: user.role,
+    menuPermissions: user.menu_permissions,
+    lastSeenAt: user.last_seen_at,
+    ipAddress: user.ip_address,
+    userAgent: user.user_agent
+  };
+}
+
+function sanitizeUserAgent(userAgent: string | undefined) {
+  const normalized = String(userAgent ?? "").trim();
+  return normalized ? normalized.slice(0, 512) : null;
+}
+
 function resolveMenuPermissions(
   role: "admin" | "user",
   menuPermissions: AppMenuKey[],
@@ -254,6 +332,34 @@ async function createSession(userId: string) {
   return { token, expiresAt };
 }
 
+async function persistAuthAuditLog(input: {
+  userId?: string | null;
+  email?: string | null;
+  eventType: AuthAuditEventType;
+  ipAddress?: string;
+  userAgent?: string;
+}) {
+  const sql = getSql();
+  await sql`
+    insert into auth_audit_logs (
+      id,
+      user_id,
+      email,
+      event_type,
+      ip_address,
+      user_agent
+    )
+    values (
+      ${buildId("audit")},
+      ${input.userId ?? null},
+      ${input.email ?? null},
+      ${input.eventType},
+      ${input.ipAddress?.trim() ? input.ipAddress.trim() : null},
+      ${sanitizeUserAgent(input.userAgent)}
+    )
+  `;
+}
+
 async function getUserBySessionToken(token: string) {
   if (!token) {
     return null;
@@ -291,6 +397,12 @@ async function deleteAllUserSessions(userId: string) {
 async function removeExpiredSessions() {
   const sql = getSql();
   await sql`delete from auth_sessions where expires_at <= now()`;
+}
+
+async function removeStalePresence() {
+  const sql = getSql();
+  const cutoff = new Date(Date.now() - PRESENCE_RETENTION_MS).toISOString();
+  await sql`delete from auth_presence where last_seen_at < ${cutoff}`;
 }
 
 async function persistCredentialEmailLog(input: {
@@ -426,6 +538,15 @@ async function ensureSchema() {
         where token_hash is not null
       `;
       await sql`
+        create table if not exists auth_presence (
+          user_id text primary key references auth_users(id) on delete cascade,
+          last_seen_at timestamptz not null default now(),
+          ip_address text,
+          user_agent text,
+          updated_at timestamptz not null default now()
+        )
+      `;
+      await sql`
         create table if not exists auth_email_outbox (
           id text primary key,
           to_email text not null,
@@ -442,7 +563,27 @@ async function ensureSchema() {
       await sql`alter table auth_email_outbox add column if not exists delivery_provider text`;
       await sql`alter table auth_email_outbox add column if not exists delivery_error text`;
       await sql`alter table auth_email_outbox add column if not exists delivered_at timestamptz`;
+      await sql`
+        create table if not exists auth_audit_logs (
+          id text primary key,
+          user_id text references auth_users(id) on delete set null,
+          email text,
+          event_type text not null check (event_type in ('login_success', 'login_failed', 'logout')),
+          ip_address text,
+          user_agent text,
+          created_at timestamptz not null default now()
+        )
+      `;
+      await sql`
+        create index if not exists auth_audit_logs_created_at_idx
+        on auth_audit_logs (created_at desc)
+      `;
+      await sql`
+        create index if not exists auth_audit_logs_email_idx
+        on auth_audit_logs (email)
+      `;
       await removeExpiredSessions();
+      await removeStalePresence();
 
       if (DEFAULT_ADMIN_EMAIL && DEFAULT_ADMIN_PASSWORD) {
         const defaultAdmin = (await sql`
@@ -561,7 +702,11 @@ export async function registerAccessRequest(input: {
   return sanitizeRequest(rows[0]);
 }
 
-export async function loginWithEmailPassword(emailInput: string, password: string) {
+export async function loginWithEmailPassword(
+  emailInput: string,
+  password: string,
+  context: AuthRequestContext = {}
+) {
   const email = normalizeEmail(emailInput);
   if (!email || !password) {
     throw new HttpError(400, "กรอกอีเมลและรหัสผ่านให้ครบ");
@@ -595,10 +740,28 @@ export async function loginWithEmailPassword(emailInput: string, password: strin
   const user = rows[0];
 
   if (!user || !verifyPassword(password, user.password_hash)) {
+    await persistAuthAuditLog({
+      userId: user?.id ?? null,
+      email: email || user?.email || null,
+      eventType: "login_failed",
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent
+    }).catch(() => {
+      // Audit log failure should not block auth response.
+    });
     throw new HttpError(401, user ? "อีเมลหรือรหัสผ่านไม่ถูกต้อง" : buildLoginHelpMessage(email));
   }
 
   const session = await createSession(user.id);
+  await persistAuthAuditLog({
+    userId: user.id,
+    email: user.email,
+    eventType: "login_success",
+    ipAddress: context.ipAddress,
+    userAgent: context.userAgent
+  }).catch(() => {
+    // Audit log failure should not block auth response.
+  });
 
   return {
     user: toAuthUser(user),
@@ -625,7 +788,7 @@ export async function getAuthUserFromToken(token: string) {
   return user ? toAuthUser(user) : null;
 }
 
-export async function logoutSession(token: string) {
+export async function logoutSession(token: string, context: AuthRequestContext = {}) {
   if (!token) {
     return;
   }
@@ -635,7 +798,79 @@ export async function logoutSession(token: string) {
   }
 
   await ensureSchema();
+  const user = await getUserBySessionToken(token);
   await deleteSessionToken(token);
+  if (user) {
+    await persistAuthAuditLog({
+      userId: user.id,
+      email: user.email,
+      eventType: "logout",
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent
+    }).catch(() => {
+      // Audit log failure should not block logout.
+    });
+  }
+}
+
+export async function recordUserPresence(token: string, context: AuthRequestContext = {}) {
+  if (!token) {
+    throw new HttpError(401, "Unauthorized");
+  }
+
+  await ensureSchema();
+  const user =
+    canUseLocalAuthFallback() && token === LOCAL_AUTH_FALLBACK_TOKEN && DEFAULT_ADMIN_EMAIL
+      ? toLocalFallbackAdmin()
+      : await getUserBySessionToken(token);
+  if (!user) {
+    throw new HttpError(401, "Unauthorized");
+  }
+
+  const sql = getSql();
+  const lastSeenAt = new Date().toISOString();
+  await sql`
+    insert into auth_presence (user_id, last_seen_at, ip_address, user_agent, updated_at)
+    values (
+      ${user.id},
+      ${lastSeenAt},
+      ${context.ipAddress?.trim() ? context.ipAddress.trim() : null},
+      ${sanitizeUserAgent(context.userAgent)},
+      now()
+    )
+    on conflict (user_id) do update set
+      last_seen_at = excluded.last_seen_at,
+      ip_address = excluded.ip_address,
+      user_agent = excluded.user_agent,
+      updated_at = now()
+  `;
+  await removeStalePresence().catch(() => {
+    // Presence cleanup should not block heartbeat responses.
+  });
+
+  return { ok: true, lastSeenAt };
+}
+
+export async function getOnlineUsers(token: string) {
+  await requireAdmin(token);
+  const sql = getSql();
+  const onlineCutoff = new Date(Date.now() - ONLINE_PRESENCE_WINDOW_MS).toISOString();
+  const rows = (await sql`
+    select
+      u.*,
+      p.last_seen_at,
+      p.ip_address,
+      p.user_agent
+    from auth_presence p
+    join auth_users u on u.id = p.user_id
+    where p.last_seen_at >= ${onlineCutoff}
+    order by p.last_seen_at desc
+  `) as DbOnlineUser[];
+
+  return {
+    onlineWindowSeconds: Math.floor(ONLINE_PRESENCE_WINDOW_MS / 1000),
+    users: rows.map(sanitizeOnlineUser)
+  };
 }
 
 export async function changePassword(
@@ -707,17 +942,20 @@ async function requireAdmin(token: string) {
 export async function getAdminState(token: string) {
   await requireAdmin(token);
   const sql = getSql();
-  const [usersResult, requestsResult, dataOceanConfig] = await Promise.all([
+  const [usersResult, requestsResult, authAuditLogsResult, dataOceanConfig] = await Promise.all([
     sql`select * from auth_users order by created_at asc`,
     sql`select * from auth_access_requests order by created_at desc`,
+    sql`select * from auth_audit_logs order by created_at desc limit 100`,
     getDataOceanTokenStatus()
   ]);
   const users = usersResult as DbUser[];
   const requests = requestsResult as DbAccessRequest[];
+  const authAuditLogs = authAuditLogsResult as DbAuthAuditLog[];
 
   return {
     users: users.map(sanitizeUser),
     requests: requests.map(sanitizeRequest),
+    authAuditLogs: authAuditLogs.map(sanitizeAuditLog),
     dataOceanConfig
   };
 }

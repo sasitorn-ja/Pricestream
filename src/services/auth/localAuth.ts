@@ -26,6 +26,33 @@ export type LocalUserRecord = {
   updatedAt: string;
 };
 
+export type AuthAuditLog = {
+  id: string;
+  userId: string | null;
+  email: string | null;
+  eventType: "login_success" | "login_failed" | "logout";
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+};
+
+export type OnlineUserRecord = {
+  id: string;
+  email: string;
+  name: string;
+  company: CompanyCode;
+  role: "admin" | "user";
+  menuPermissions: AppMenuKey[];
+  lastSeenAt: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+};
+
+export type OnlineUsersResponse = {
+  onlineWindowSeconds: number;
+  users: OnlineUserRecord[];
+};
+
 export type EmailDeliveryResult = {
   delivered: boolean;
   provider: "smtp" | "none";
@@ -59,6 +86,7 @@ type CreateLocalUserResponse = {
 export type AdminState = {
   users: LocalUserRecord[];
   requests: LocalAccessRequest[];
+  authAuditLogs: AuthAuditLog[];
   dataOceanConfig: DataOceanTokenStatus;
 };
 
@@ -366,12 +394,25 @@ export async function changeLocalPassword(input: {
   });
 }
 
+export async function recordPresence() {
+  return requestJson<{ ok: true; lastSeenAt: string }>("/api/auth/presence", {
+    method: "POST",
+    timeoutMs: AUTH_BOOTSTRAP_TIMEOUT_MS
+  });
+}
+
 export async function getAdminState() {
   return requestJson<AdminState>("/api/auth/admin/state");
 }
 
 export async function getAdminNotificationSummary() {
   return requestJson<AdminNotificationSummary>("/api/auth/admin/notifications");
+}
+
+export async function getOnlineUsers() {
+  return requestJson<OnlineUsersResponse>("/api/auth/admin/online-users", {
+    timeoutMs: AUTH_BOOTSTRAP_TIMEOUT_MS
+  });
 }
 
 export async function approveAccessRequest(

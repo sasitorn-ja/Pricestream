@@ -6,11 +6,11 @@ import {
   Legend,
   Line,
   LineChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis
 } from "recharts";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../../../../components/ui/button";
 import { Input } from "../../../../components/ui/input";
 import { appShellClass, emptyStateClass, sectionClass } from "../../../../components/ui/styles";
@@ -40,6 +40,7 @@ const DAILY_POINT_WIDTH = 68;
 const MIN_SCROLLABLE_CHART_WIDTH = 960;
 const MIN_RESPONSIVE_CHART_WIDTH = 320;
 const CHART_CONTENT_HEIGHT = 320;
+const DIVISION_PRICE_CHART_HEIGHT = 272;
 const CHART_SIDE_PADDING = 24;
 const DIVISION_PRICE_Y_AXIS_DOMAIN: [number, number] = [1500, 3000];
 const DIVISION_PRICE_Y_AXIS_TICKS = [1500, 1750, 2000, 2250, 2500, 3000];
@@ -107,6 +108,38 @@ type DivisionPriceTrendTableRow = {
   divisionName: string;
   values: Record<string, number | null>;
 };
+
+function useElementWidth<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) {
+      return;
+    }
+
+    const updateWidth = () => {
+      setWidth(element.clientWidth);
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateWidth);
+      return () => window.removeEventListener("resize", updateWidth);
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateWidth();
+    });
+    observer.observe(element);
+
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, width] as const;
+}
 
 function getMonthKey(day: string) {
   return day.slice(0, 7);
@@ -320,18 +353,21 @@ export function TrendChartsSection({
   onSetChartRangeEnd,
   onOpenCalcHelp
 }: TrendChartsSectionProps) {
+  const [averageChartRef, averageContainerWidth] = useElementWidth<HTMLDivElement>();
+  const [divisionPriceChartRef, divisionPriceContainerWidth] = useElementWidth<HTMLDivElement>();
+  const [proportionChartRef, proportionContainerWidth] = useElementWidth<HTMLDivElement>();
   const isDailyGranularity = trendGranularity === "daily";
   const shouldShowEveryAverageTick = isDailyGranularity || filteredAverageTrend.length <= 14;
   const shouldShowEveryProportionTick = isDailyGranularity || proportionTrendData.length <= 14;
   const averageChartWidth = isDailyGranularity
     ? Math.max(MIN_SCROLLABLE_CHART_WIDTH, filteredAverageTrend.length * DAILY_POINT_WIDTH)
-    : null;
+    : Math.max(MIN_RESPONSIVE_CHART_WIDTH, averageContainerWidth || MIN_RESPONSIVE_CHART_WIDTH);
   const proportionChartWidth = isDailyGranularity
     ? Math.max(MIN_SCROLLABLE_CHART_WIDTH, proportionTrendData.length * DAILY_POINT_WIDTH)
-    : null;
+    : Math.max(MIN_RESPONSIVE_CHART_WIDTH, proportionContainerWidth || MIN_RESPONSIVE_CHART_WIDTH);
   const divisionPriceChartWidth = isDailyGranularity
     ? Math.max(MIN_SCROLLABLE_CHART_WIDTH, divisionPriceChartData.length * DAILY_POINT_WIDTH)
-    : null;
+    : Math.max(MIN_RESPONSIVE_CHART_WIDTH, divisionPriceContainerWidth || MIN_RESPONSIVE_CHART_WIDTH);
   const divisionPriceYAxisDomain = DIVISION_PRICE_Y_AXIS_DOMAIN;
   const divisionPriceYAxisTicks = DIVISION_PRICE_Y_AXIS_TICKS;
   const shouldShowEveryDivisionPriceTick = isDailyGranularity || divisionPriceChartData.length <= 14;
@@ -485,10 +521,6 @@ export function TrendChartsSection({
   };
 
   const chartBoxClass = "h-[360px] rounded-[24px] border border-[var(--border)] bg-[var(--surface-muted)] p-3 md:p-4";
-  const getInitialChartDimension = (width: number | null) => ({
-    width: width ?? MIN_SCROLLABLE_CHART_WIDTH,
-    height: CHART_CONTENT_HEIGHT
-  });
   const renderRangeControls = () => (
     <>
       <select
@@ -573,17 +605,12 @@ export function TrendChartsSection({
               }
             />
           ) : (
-            <div className={cn("h-full min-w-0", isDailyGranularity && "overflow-x-auto")}>
-              <div className="h-full min-w-0" style={averageChartWidth ? { width: `${averageChartWidth}px` } : undefined}>
-                <ResponsiveContainer
-                  width="100%"
-                  height="100%"
-                  minWidth={MIN_RESPONSIVE_CHART_WIDTH}
-                  minHeight={280}
-                  initialDimension={getInitialChartDimension(averageChartWidth)}
-                >
+            <div ref={averageChartRef} className={cn("h-full min-w-0", isDailyGranularity && "overflow-x-auto")}>
+              <div className="min-w-0" style={{ width: `${averageChartWidth}px`, height: `${CHART_CONTENT_HEIGHT}px` }}>
                 <LineChart
                   data={filteredAverageTrend}
+                  width={averageChartWidth}
+                  height={CHART_CONTENT_HEIGHT}
                   margin={{
                     top: 36,
                     right: CHART_SIDE_PADDING,
@@ -632,7 +659,6 @@ export function TrendChartsSection({
                     <LabelList dataKey="avgIncrease" content={renderAveragePointLabel} />
                   </Line>
                 </LineChart>
-                </ResponsiveContainer>
               </div>
             </div>
           )}
@@ -677,17 +703,18 @@ export function TrendChartsSection({
             ) : (
               <div className="flex h-full min-h-0 flex-col gap-3">
                 <ChartLegend series={divisionPriceLegendSeries} />
-                <div className={cn("min-h-0 flex-1 min-w-0", isDailyGranularity && "overflow-x-auto")}>
-                  <div className="h-full min-w-0" style={divisionPriceChartWidth ? { width: `${divisionPriceChartWidth}px` } : undefined}>
-                    <ResponsiveContainer
-                      width="100%"
-                      height="100%"
-                      minWidth={MIN_RESPONSIVE_CHART_WIDTH}
-                      minHeight={250}
-                      initialDimension={getInitialChartDimension(divisionPriceChartWidth)}
-                    >
+                <div
+                  ref={divisionPriceChartRef}
+                  className={cn("min-h-0 flex-1 min-w-0", isDailyGranularity && "overflow-x-auto")}
+                >
+                  <div
+                    className="min-w-0"
+                    style={{ width: `${divisionPriceChartWidth}px`, height: `${DIVISION_PRICE_CHART_HEIGHT}px` }}
+                  >
                     <LineChart
                       data={divisionPriceChartData}
+                      width={divisionPriceChartWidth}
+                      height={DIVISION_PRICE_CHART_HEIGHT}
                       margin={{
                         top: 36,
                         right: CHART_SIDE_PADDING,
@@ -735,7 +762,6 @@ export function TrendChartsSection({
                         );
                       })}
                     </LineChart>
-                    </ResponsiveContainer>
                   </div>
                 </div>
               </div>
@@ -864,17 +890,12 @@ export function TrendChartsSection({
               }
             />
           ) : (
-            <div className={cn("h-full min-w-0", isDailyGranularity && "overflow-x-auto")}>
-              <div className="h-full" style={proportionChartWidth ? { width: `${proportionChartWidth}px` } : undefined}>
-                <ResponsiveContainer
-                  width="100%"
-                  height="100%"
-                  minWidth={MIN_RESPONSIVE_CHART_WIDTH}
-                  minHeight={280}
-                  initialDimension={getInitialChartDimension(proportionChartWidth)}
-                >
+            <div ref={proportionChartRef} className={cn("h-full min-w-0", isDailyGranularity && "overflow-x-auto")}>
+              <div style={{ width: `${proportionChartWidth}px`, height: `${CHART_CONTENT_HEIGHT}px` }}>
                 <BarChart
                   data={proportionTrendData}
+                  width={proportionChartWidth}
+                  height={CHART_CONTENT_HEIGHT}
                   barCategoryGap="10%"
                   margin={{
                     top: 0,
@@ -926,7 +947,6 @@ export function TrendChartsSection({
                     </Bar>
                   ))}
                 </BarChart>
-                </ResponsiveContainer>
               </div>
             </div>
           )}
@@ -979,16 +999,11 @@ export function TrendChartsSection({
             />
           ) : (
             <div className={cn("h-full min-w-0", isDailyGranularity && "overflow-x-auto")}>
-              <div className="h-full" style={proportionChartWidth ? { width: `${proportionChartWidth}px` } : undefined}>
-                <ResponsiveContainer
-                  width="100%"
-                  height="100%"
-                  minWidth={MIN_RESPONSIVE_CHART_WIDTH}
-                  minHeight={280}
-                  initialDimension={getInitialChartDimension(proportionChartWidth)}
-                >
+              <div style={{ width: `${proportionChartWidth}px`, height: `${CHART_CONTENT_HEIGHT}px` }}>
                 <BarChart
                   data={proportionTrendData}
+                  width={proportionChartWidth}
+                  height={CHART_CONTENT_HEIGHT}
                   barCategoryGap="10%"
                   margin={{
                     top: 0,
@@ -1040,7 +1055,6 @@ export function TrendChartsSection({
                     </Bar>
                   ))}
                 </BarChart>
-                </ResponsiveContainer>
               </div>
             </div>
           )}
