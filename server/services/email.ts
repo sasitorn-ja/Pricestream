@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 
 type EmailInput = {
   to: string;
@@ -16,7 +16,7 @@ export type EmailDeliveryResult = {
   reason?: string;
 };
 
-let cachedTransporter: nodemailer.Transporter | null = null;
+let cachedTransporter: Transporter | null = null;
 let cachedTransporterKey = "";
 
 function readBooleanEnv(value: string | undefined, fallback: boolean) {
